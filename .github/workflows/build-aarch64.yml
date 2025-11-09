@@ -38,7 +38,7 @@ jobs:
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
           ./scripts/feeds update -a
-          ./scripts/feeds install asterisk-${{ inputs.asterisk_version }}
+          ./scripts/feeds install asterisk${{ inputs.asterisk_version }}
 
       - name: Clone chan_quectel
         run: |
@@ -71,7 +71,7 @@ jobs:
           echo 'define Package/chan_quectel' >> "$MF"
           echo '  SECTION:=telephony' >> "$MF"
           echo '  CATEGORY:=Telephony' >> "$MF"
-          echo "  DEPENDS:=+asterisk-$AST_VERSION +libopenssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
+          echo "  DEPENDS:=+asterisk$AST_VERSION +libopenssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
           echo '  TITLE:=Asterisk channel driver for Quectel' >> "$MF"
           echo '  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel' >> "$MF"
           echo 'endef' >> "$MF"
@@ -104,7 +104,7 @@ jobs:
           
           # Create minimal .config with dependencies
           touch .config
-          echo "CONFIG_PACKAGE_asterisk-$AST_VERSION=m" >> .config
+          echo "CONFIG_PACKAGE_asterisk$AST_VERSION=m" >> .config
           echo "CONFIG_PACKAGE_chan_quectel=m" >> .config
           echo "CONFIG_PACKAGE_libopenssl=m" >> .config
           echo "CONFIG_PACKAGE_libiconv-full=m" >> .config
@@ -120,7 +120,11 @@ jobs:
           cd "$SDK_PATH"
           
           echo "=== Building dependencies ==="
-          make package/feeds/telephony/asterisk-${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
+          make package/libopenssl/compile -j$(nproc) V=s
+          make package/libiconv-full/compile -j$(nproc) V=s
+          make package/alsa-lib/compile -j$(nproc) V=s
+          make package/libusb/compile -j$(nproc) V=s
+          make package/feeds/telephony/asterisk${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
           
           echo "=== Building chan_quectel ==="
           make package/feeds/custom/chan_quectel/download V=s
