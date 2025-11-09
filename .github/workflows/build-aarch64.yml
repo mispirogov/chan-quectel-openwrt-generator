@@ -120,10 +120,10 @@ jobs:
           cd "$SDK_PATH"
           
           echo "=== Building dependencies ==="
-          make package/libopenssl/compile -j$(nproc) V=s
-          make package/libiconv-full/compile -j$(nproc) V=s
-          make package/alsa-lib/compile -j$(nproc) V=s
-          make package/libusb/compile -j$(nproc) V=s
+          make package/feeds/packages/openssl/compile -j$(nproc) V=s
+          make package/feeds/packages/libiconv-full/compile -j$(nproc) V=s
+          make package/feeds/packages/alsa-lib/compile -j$(nproc) V=s
+          make package/feeds/packages/libusb/compile -j$(nproc) V=s
           make package/feeds/telephony/asterisk${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
           
           echo "=== Building chan_quectel ==="
