@@ -58,6 +58,8 @@ jobs:
           cd "$SDK_PATH/package/feeds/custom"
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           
+          rm -f "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
+          
           cat > "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile" << 'PKGEOF'
 include $(TOPDIR)/rules.mk
 
@@ -87,18 +89,22 @@ endef
 define Build/Configure
 	cd $(PKG_BUILD_DIR); \
 	./bootstrap; \
-	./configure --with-astversion=20 \
-		--with-asterisk=$(STAGING_DIR)/usr \
-		--with-openssl=$(STAGING_DIR)/usr \
-		CFLAGS="$(TARGET_CFLAGS)" \
-		LDFLAGS="$(TARGET_LDFLAGS)" \
-		CPPFLAGS="$(TARGET_CPPFLAGS)"
+	./configure \
+		--with-astversion=20 \
+		--with-asterisk=$(STAGING_DIR_HOST)/usr \
+		--with-openssl=$(STAGING_DIR_HOST)/usr \
+		--build=$(GNU_HOST_NAME) \
+		--host=$(GNU_TARGET_NAME) \
+		CFLAGS="$(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include" \
+		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib"
 endef
 
 define Build/Compile
 	$(MAKE) -C $(PKG_BUILD_DIR) \
 		CC="$(TARGET_CC)" \
+		CXX="$(TARGET_CXX)" \
 		CFLAGS="$(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include" \
+		CXXFLAGS="$(TARGET_CXXFLAGS)" \
 		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib"
 endef
 
@@ -115,9 +121,9 @@ PKGEOF
           SDK_PATH=$(cat /tmp/sdk_path.txt)
           cd "$SDK_PATH"
           
-          echo "Building chan_quectel package..."
+          echo "=== Building chan_quectel ==="
           make package/feeds/custom/chan_quectel/prepare -j$(nproc)
-          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
+          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc 2>&1 | tee /tmp/build.log
 
       - name: Find and copy IPK
         run: |
@@ -126,14 +132,19 @@ PKGEOF
           mkdir -p /tmp/output
           
           echo "=== Searching for IPK files ==="
-          find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -type f
+          find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -type f -exec ls -lah {} \;
           
           find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -exec cp {} /tmp/output/ \;
           
-          find "$SDK_PATH/build_dir" -name "chan_quectel.so" -exec cp {} /tmp/output/ \;
-          
-          echo "=== Output files ==="
+          echo "=== Output directory ==="
           ls -lah /tmp/output/
+          
+          if [ -z "$(ls -A /tmp/output/)" ]; then
+            echo "ERROR: No files in output!"
+            echo "=== Build log ==="
+            tail -50 /tmp/build.log
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
