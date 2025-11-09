@@ -37,7 +37,7 @@ jobs:
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
-          ./scripts/feeds update telephony
+          ./scripts/feeds update -a
           ./scripts/feeds install asterisk${{ inputs.asterisk_version }}
 
       - name: Clone chan_quectel
@@ -47,7 +47,7 @@ jobs:
           cd "$SDK_PATH/package/feeds/custom"
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           rm -f chan_quectel/Makefile
-          rm -rf chan_quectel/openwrt  # Remove conflicting subdirectory to avoid extra Makefile processing
+          rm -rf chan_quectel/openwrt  # Remove conflicting subdirectory
 
       - name: Create Makefile for chan_quectel
         env:
@@ -71,7 +71,7 @@ jobs:
           echo 'define Package/chan_quectel' >> "$MF"
           echo '  SECTION:=telephony' >> "$MF"
           echo '  CATEGORY:=Telephony' >> "$MF"
-          echo "  DEPENDS:=+asterisk$AST_VERSION +libopenssl" >> "$MF"
+          echo "  DEPENDS:=+asterisk$AST_VERSION +libopenssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
           echo '  TITLE:=Asterisk channel driver for Quectel' >> "$MF"
           echo '  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel' >> "$MF"
           echo 'endef' >> "$MF"
@@ -81,7 +81,7 @@ jobs:
           echo 'endef' >> "$MF"
           echo '' >> "$MF"
           echo 'define Build/Configure' >> "$MF"
-          echo -e "\tcd \$(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$AST_VERSION" >> "$MF"
+          echo -e "\tcd \$(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$AST_VERSION --with-asterisk=\$(STAGING_DIR)/usr --with-iconv=\$(STAGING_DIR)/usr" >> "$MF"
           echo 'endef' >> "$MF"
           echo '' >> "$MF"
           echo 'define Build/Compile' >> "$MF"
@@ -114,6 +114,9 @@ jobs:
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
+          
+          echo "=== Building dependencies ==="
+          make package/asterisk${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
           
           echo "=== Building chan_quectel ==="
           make package/feeds/custom/chan_quectel/download V=s
