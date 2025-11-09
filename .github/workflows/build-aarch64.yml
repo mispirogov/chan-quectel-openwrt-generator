@@ -1,4 +1,4 @@
-name: Build chan_quectel for aarch64_cortex-a53
+name: Build chan_quectel IPK aarch64
 
 on:
   workflow_dispatch:
@@ -18,94 +18,73 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install build tools
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget tar gzip build-essential libncurses-dev zlib1g-dev gawk git autoconf automake libtool pkg-config
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk git wget tar gzip flex bison patch diffstat autoconf automake libtool
 
-      - name: Download OpenWrt SDK
+      - name: Download SDK
         run: |
           cd /tmp
-          echo "Downloading SDK..."
-          wget -q https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          echo "Extracting SDK..."
+          wget https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
           tar -xf *.tar.xz
-          SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
-          echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
-          echo "SDK extracted to: /tmp/$SDK_DIR"
+          mv openwrt-sdk-* sdk
+          echo "SDK_PATH=/tmp/sdk" >> $GITHUB_ENV
 
-      - name: Install Asterisk development files
+      - name: Build chan_quectel directly
         run: |
-          cd "$SDK_PATH"
-          echo "Downloading Asterisk..."
-          # Download pre-built Asterisk packages
-          ASTERISK_VER=${{ github.event.inputs.asterisk_version }}
-          
-          mkdir -p asterisk-tmp
-          cd asterisk-tmp
-          
-          # Download Asterisk package
-          wget -q https://downloads.openwrt.org/releases/23.05.0/packages/aarch64_cortex-a53/telephony/asterisk${ASTERISK_VER}_*.ipk || \
-          wget -q https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/telephony/asterisk${ASTERISK_VER}_*.ipk || \
-          true
-          
-          echo "Asterisk packages:"
-          ls -la asterisk*.ipk || echo "No IPK found, will compile without pre-built"
-
-      - name: Compile chan_quectel directly
-        run: |
-          cd "$GITHUB_WORKSPACE"
+          cd $GITHUB_WORKSPACE
           
           ASTERISK_VER=${{ github.event.inputs.asterisk_version }}
           
-          echo "=== Compiling chan_quectel for Asterisk $ASTERISK_VER ==="
+          echo "=== Building chan_quectel directly ==="
           
-          # Ensure we have bootstrap
-          if [ -f bootstrap ]; then
-            ./bootstrap
-          fi
+          # Bootstrap and configure
+          test -f bootstrap && ./bootstrap
+          ./configure --with-astversion=$ASTERISK_VER
           
-          # Configure for compilation
-          ./configure --with-astversion=$ASTERISK_VER \
-                     --with-asterisk-includes=/tmp/asterisk-includes \
-                     --with-asterisk-libs=/tmp/asterisk-libs || \
-          ./configure --with-astversion=$ASTERISK_VER || true
+          # Show what we have
+          echo "=== Files after configure ==="
+          ls -la
           
-          # Try to compile
-          if [ -f Makefile ]; then
-            make clean || true
-            make -j$(nproc) || make -j1
-          else
-            echo "No Makefile found after configure"
-            ls -la
-          fi
+          # Compile
+          echo "=== Starting compilation ==="
+          make -j$(nproc)
+          
+          # Show what was built
+          echo "=== Files after build ==="
+          find . -name "chan_quectel*" -type f
+          ls -la chan_quectel.* 2>/dev/null || echo "Files not in root"
 
-      - name: Find and copy compiled module
+      - name: Copy compiled files
         run: |
-          mkdir -p /tmp/artifacts
+          mkdir -p /tmp/ipk_out
+          
+          cd $GITHUB_WORKSPACE
           
           echo "=== Searching for compiled files ==="
           
-          # Search in workspace
-          find "$GITHUB_WORKSPACE" -type f \( -name "*.so" -o -name "*.o" -o -name "*.a" \) | head -20
+          # Find chan_quectel.so
+          find . -name "chan_quectel.so" -type f -exec ls -la {} \; -exec cp {} /tmp/ipk_out/ \;
           
-          # Copy any .so files
-          find "$GITHUB_WORKSPACE" -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
-          find "$GITHUB_WORKSPACE" -name "chan_quectel*.o" -exec cp {} /tmp/artifacts/ \;
+          # Find other artifacts
+          find . -name "chan_quectel.o" -type f -exec cp {} /tmp/ipk_out/ \;
+          find . -name "chan_quectel*.la" -type f -exec cp {} /tmp/ipk_out/ \;
           
-          # If nothing found, create a marker file
-          if [ ! -f /tmp/artifacts/chan_quectel.so ]; then
-            echo "WARNING: chan_quectel.so not found" > /tmp/artifacts/BUILD_INFO.txt
-            echo "Searched in: $GITHUB_WORKSPACE" >> /tmp/artifacts/BUILD_INFO.txt
-            find "$GITHUB_WORKSPACE" -type f -newer /tmp/BUILD_START 2>/dev/null | head -20 >> /tmp/artifacts/BUILD_INFO.txt || true
+          # Check what we got
+          echo "=== Files copied ==="
+          ls -lah /tmp/ipk_out/
+          
+          if [ ! -f /tmp/ipk_out/chan_quectel.so ]; then
+            echo "ERROR: chan_quectel.so not found!"
+            echo "=== Complete directory listing ==="
+            find $GITHUB_WORKSPACE -type f -name "*.so" -o -name "*.o" | head -30
+            exit 1
           fi
-          
-          echo "=== Artifacts ready ==="
-          ls -lah /tmp/artifacts/
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chan-quectel-aarch64_cortex-a53
-          path: /tmp/artifacts/
+          name: chan-quectel-compiled
+          path: /tmp/ipk_out/
           retention-days: 7
