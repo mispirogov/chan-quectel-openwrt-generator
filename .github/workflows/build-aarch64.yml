@@ -1,15 +1,3 @@
-### Исправленный GitHub Actions Workflow для сборки chan_quectel IPK
-
-На основе анализа ошибки (дубликат фида 'telephony' в feeds.conf.default, вызванный повторным добавлением существующего фида), я доработал workflow. Ключевые изменения:
-- Удалена строка добавления фида 'telephony', поскольку он уже присутствует в стандартном feeds.conf.default SDK OpenWrt 23.05.0 (из официального репозитория git.openwrt.org, что эквивалентно зеркалу на GitHub).
-- Сохранены шаги обновления и установки пакетов из существующего фида, чтобы избежать рекурсивных зависимостей и обеспечить доступ к asterisk20 (или asterisk18).
-- Улучшена обработка переменных для динамической версии Asterisk.
-- Обновлены остальные шаги для совместимости и надежности (например, использование actions/checkout@v4 и actions/upload-artifact@v4).
-- Workflow теперь пропускает ненужные добавления, избегает интерактивных шагов (menuconfig заменен на defconfig) и фокусируется на минимальной конфигурации.
-
-Скопируйте этот YAML в файл `.github/workflows/build-chan-quectel.yml` вашего репозитория GitHub. Запустите workflow вручную через интерфейс Actions, выбрав версию Asterisk (по умолчанию 20). Время сборки — около 15–20 минут.
-
-```yaml
 name: Build chan_quectel IPK for aarch64_cortex-a53
 
 on:
@@ -33,14 +21,15 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk git wget tar gzip flex bison patch diffstat autoconf automake libtool libssl-dev
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk git wget tar gzip flex bison patch diffstat autoconf automake libtool libssl-dev zstd
 
       - name: Download and extract SDK
         run: |
           cd /tmp
           echo "Downloading OpenWrt SDK..."
-          wget -q https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          tar -xf openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          wget -q https://downloads.openwrt.org/releases/24.10.4/targets/rockchip/armv8/openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          zstd -d openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          tar -xf openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar
           SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
           echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
 
@@ -109,58 +98,3 @@ jobs:
       - name: Prepare SDK (skip menuconfig)
         env:
           AST_VERSION: ${{ inputs.asterisk_version }}
-        run: |
-          SDK_PATH=${{ env.SDK_PATH }}
-          cd "$SDK_PATH"
-          
-          # Create minimal .config
-          touch .config
-          echo "CONFIG_PACKAGE_asterisk$AST_VERSION=m" >> .config
-          echo "CONFIG_PACKAGE_chan_quectel=m" >> .config
-          
-          # Run defconfig to expand config
-          make defconfig V=s
-
-      - name: Build chan_quectel
-        run: |
-          SDK_PATH=${{ env.SDK_PATH }}
-          cd "$SDK_PATH"
-          
-          echo "=== Building chan_quectel ==="
-          make package/feeds/custom/chan_quectel/download V=s
-          make package/feeds/custom/chan_quectel/prepare V=s
-          make package/feeds/custom/chan_quectel/compile -j\$(nproc) V=s
-
-      - name: Find and collect artifacts
-        run: |
-          SDK_PATH=${{ env.SDK_PATH }}
-          mkdir -p /tmp/artifacts
-          
-          echo "=== Searching for compiled files ==="
-          find "$SDK_PATH" -type f \( -name "*chan_quectel*.ipk" -o -name "chan_quectel.so" \) -print0 | xargs -0 ls -lah
-          
-          # Copy IPK files
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          
-          # Copy compiled .so as fallback
-          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          
-          echo ""
-          echo "=== Artifacts found ==="
-          ls -lah /tmp/artifacts/ || echo "No artifacts found"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chan-quectel-aarch64_cortex-a53-${{ inputs.asterisk_version }}
-          path: /tmp/artifacts/
-          retention-days: 7
-```
-
-### Инструкция по использованию и тестированию
-1. **Запуск**: В GitHub перейдите в Actions, выберите workflow, укажите версию Asterisk и запустите. Следите за логами шага "Setup feeds" — теперь без дубликатов.
-2. **Скачивание результатов**: После успешной сборки скачайте артефакт (.ipk-файл) из Summary workflow.
-3. **Установка на роутер**: Перенесите IPK на устройство и выполните `opkg install /path/to/chan_quectel_*.ipk`. Предварительно убедитесь в наличии Asterisk 20 (установите из репозитория OpenWrt, если нужно).
-4. **Возможные доработки**: Если SDK-версия устарела (например, вышла новая релиз OpenWrt), обновите URL скачивания в шаге "Download and extract SDK". Если возникнут новые ошибки, поделитесь логами для дальнейшей корректировки.
-
-Этот workflow теперь стабилен, решает проблему дубликатов и обеспечивает сборку без компиляции на роутере.
