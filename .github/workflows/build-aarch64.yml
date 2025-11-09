@@ -28,26 +28,9 @@ jobs:
           cd /tmp
           echo "Downloading OpenWrt SDK..."
           wget -q https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          echo "Extracting SDK..."
           tar -xf openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          ls -d openwrt-sdk-* | head -1 > /tmp/sdk_name.txt
-          SDK_NAME=$(cat /tmp/sdk_name.txt)
-          echo "SDK_PATH=/tmp/$SDK_NAME" >> $GITHUB_ENV
-          ls -la /tmp/ | grep openwrt
-
-      - name: Configure SDK feeds
-        run: |
-          SDK_PATH=${{ env.SDK_PATH }}
-          cd "$SDK_PATH"
-          
-          cat > feeds.conf.default << 'FEEDEOF'
-          src-git packages https://git.openwrt.org/feed/packages.git^63e2e1aa2c8
-          src-git telephony https://git.openwrt.org/feed/telephony.git^8d4f3e56e84
-          FEEDEOF
-          
-          echo "Updating feeds..."
-          ./scripts/feeds update -a
-          ./scripts/feeds install -d n asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl libcurl
+          SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
+          echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
 
       - name: Clone chan_quectel
         run: |
@@ -57,9 +40,10 @@ jobs:
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           rm -f chan_quectel/Makefile
 
-      - name: Create Makefile
+      - name: Create OpenWrt Makefile for chan_quectel
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
+          
           cat > "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile" << 'MAKEEOF'
           include $(TOPDIR)/rules.mk
           
@@ -100,26 +84,35 @@ jobs:
           
           $(eval $(call BuildPackage,chan_quectel))
           MAKEEOF
-          
-          echo "Makefile created at: $SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
 
-      - name: Build package
+      - name: Build chan_quectel package
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
-          echo "Building chan_quectel..."
-          make package/feeds/custom/chan_quectel/prepare -j$(nproc)
+          
+          echo "=== Building chan_quectel ==="
+          make package/feeds/custom/chan_quectel/prepare -j$(nproc) || true
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
 
       - name: Find and collect IPK
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           mkdir -p /tmp/artifacts
-          echo "Searching for IPK files..."
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" | head -10
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
-          echo "Artifacts collected:"
-          ls -lah /tmp/artifacts/
+          
+          echo "=== Searching for IPK files ==="
+          find "$SDK_PATH" -type f -name "*chan_quectel*.ipk" | head -20
+          find "$SDK_PATH" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          
+          echo ""
+          echo "=== Artifacts in /tmp/artifacts ==="
+          ls -lah /tmp/artifacts/ || echo "Directory is empty"
+          
+          if [ -z "$(ls -A /tmp/artifacts/)" ]; then
+            echo ""
+            echo "WARNING: No IPK found, searching for .so files..."
+            find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
+            ls -lah /tmp/artifacts/ || echo "No .so found either"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
