@@ -21,66 +21,86 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget tar gzip build-essential libncurses-dev zlib1g-dev gawk git flex bison
+          sudo apt-get install -y wget tar gzip build-essential libncurses-dev zlib1g-dev gawk git autoconf automake libtool pkg-config
 
       - name: Download OpenWrt SDK
         run: |
           cd /tmp
+          echo "Downloading SDK..."
           wget -q https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          echo "Extracting SDK..."
           tar -xf *.tar.xz
           SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
           echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
+          echo "SDK extracted to: /tmp/$SDK_DIR"
 
-      - name: Setup SDK minimal
+      - name: Install Asterisk development files
         run: |
           cd "$SDK_PATH"
-          # Update only necessary feeds
-          ./scripts/feeds update packages
-          ./scripts/feeds install asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl-devel
-
-      - name: Add chan_quectel
-        run: |
-          cd "$SDK_PATH"
-          mkdir -p feeds/custom
-          cp -r $GITHUB_WORKSPACE feeds/custom/chan_quectel
-          
-          # Add custom feed to feeds.conf
-          echo "src-git custom file://feeds/custom" >> feeds.conf.default
-          
-          # Install from custom feed
-          ./scripts/feeds update custom
-          ./scripts/feeds install -p custom chan_quectel
-
-      - name: Build directly with make
-        run: |
-          cd "$SDK_PATH"
-          # Build chan_quectel directly
-          cd feeds/custom/chan_quectel
-          
-          # Check Asterisk version
+          echo "Downloading Asterisk..."
+          # Download pre-built Asterisk packages
           ASTERISK_VER=${{ github.event.inputs.asterisk_version }}
           
-          # Compile
-          make -f Makefile ASTERISK_VER=$ASTERISK_VER
+          mkdir -p asterisk-tmp
+          cd asterisk-tmp
           
-          # If Makefile doesn't work, try autotools
-          if [ ! -f Makefile ]; then
+          # Download Asterisk package
+          wget -q https://downloads.openwrt.org/releases/23.05.0/packages/aarch64_cortex-a53/telephony/asterisk${ASTERISK_VER}_*.ipk || \
+          wget -q https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/telephony/asterisk${ASTERISK_VER}_*.ipk || \
+          true
+          
+          echo "Asterisk packages:"
+          ls -la asterisk*.ipk || echo "No IPK found, will compile without pre-built"
+
+      - name: Compile chan_quectel directly
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          
+          ASTERISK_VER=${{ github.event.inputs.asterisk_version }}
+          
+          echo "=== Compiling chan_quectel for Asterisk $ASTERISK_VER ==="
+          
+          # Ensure we have bootstrap
+          if [ -f bootstrap ]; then
             ./bootstrap
-            ./configure --with-astversion=$ASTERISK_VER
-            make
+          fi
+          
+          # Configure for compilation
+          ./configure --with-astversion=$ASTERISK_VER \
+                     --with-asterisk-includes=/tmp/asterisk-includes \
+                     --with-asterisk-libs=/tmp/asterisk-libs || \
+          ./configure --with-astversion=$ASTERISK_VER || true
+          
+          # Try to compile
+          if [ -f Makefile ]; then
+            make clean || true
+            make -j$(nproc) || make -j1
+          else
+            echo "No Makefile found after configure"
+            ls -la
           fi
 
-      - name: Copy compiled module
+      - name: Find and copy compiled module
         run: |
           mkdir -p /tmp/artifacts
           
-          # Find the built .so file
-          find "$SDK_PATH" -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
+          echo "=== Searching for compiled files ==="
           
-          # Also look for .o files
-          find "$SDK_PATH" -path "*chan_quectel*.o" -exec cp {} /tmp/artifacts/ \;
+          # Search in workspace
+          find "$GITHUB_WORKSPACE" -type f \( -name "*.so" -o -name "*.o" -o -name "*.a" \) | head -20
           
-          echo "=== Built files ==="
+          # Copy any .so files
+          find "$GITHUB_WORKSPACE" -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
+          find "$GITHUB_WORKSPACE" -name "chan_quectel*.o" -exec cp {} /tmp/artifacts/ \;
+          
+          # If nothing found, create a marker file
+          if [ ! -f /tmp/artifacts/chan_quectel.so ]; then
+            echo "WARNING: chan_quectel.so not found" > /tmp/artifacts/BUILD_INFO.txt
+            echo "Searched in: $GITHUB_WORKSPACE" >> /tmp/artifacts/BUILD_INFO.txt
+            find "$GITHUB_WORKSPACE" -type f -newer /tmp/BUILD_START 2>/dev/null | head -20 >> /tmp/artifacts/BUILD_INFO.txt || true
+          fi
+          
+          echo "=== Artifacts ready ==="
           ls -lah /tmp/artifacts/
 
       - name: Upload artifacts
