@@ -57,7 +57,7 @@ jobs:
           ls -lah /tmp/artifacts/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: chan-quectel-aarch64_cortex-a53
           path: /tmp/artifacts/
