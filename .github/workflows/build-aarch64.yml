@@ -41,14 +41,13 @@ jobs:
           
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
           
-          # Minimal feeds configuration
           cat > feeds.conf.default << 'EOF'
           src-git packages https://git.openwrt.org/feed/packages.git^63e2e1aa2c8
           src-git telephony https://git.openwrt.org/feed/telephony.git^8d4f3e56e84
           EOF
           
           ./scripts/feeds update -a
-          ./scripts/feeds install -d n asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl-dev libcurl
+          ./scripts/feeds install -d n asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl libcurl
 
       - name: Create chan_quectel package
         run: |
@@ -56,11 +55,9 @@ jobs:
           
           mkdir -p "$SDK_PATH/package/feeds/custom"
           
-          # Clone actual chan_quectel repo
           cd "$SDK_PATH/package/feeds/custom"
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           
-          # Create OpenWrt Makefile wrapper
           cat > "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile" << 'PKGEOF'
 include $(TOPDIR)/rules.mk
 
@@ -72,33 +69,37 @@ PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
 PKG_SOURCE_VERSION:=master
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
-PKG_INSTALL:=1
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/chan_quectel
   SECTION:=telephony
   CATEGORY:=Telephony
-  DEPENDS:=asterisk libopenssl
+  DEPENDS:=asterisk +libopenssl
   TITLE:=Asterisk channel driver for Quectel
   URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
 endef
 
 define Package/chan_quectel/description
-  Asterisk channel driver for Quectel LTE modems
+ Asterisk channel driver for Quectel LTE modems
 endef
-
-TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include
-TARGET_LDFLAGS += -L$(STAGING_DIR)/usr/lib
 
 define Build/Configure
 	cd $(PKG_BUILD_DIR); \
 	./bootstrap; \
-	./configure --with-astversion=20 --prefix=/usr
+	./configure --with-astversion=20 \
+		--with-asterisk=$(STAGING_DIR)/usr \
+		--with-openssl=$(STAGING_DIR)/usr \
+		CFLAGS="$(TARGET_CFLAGS)" \
+		LDFLAGS="$(TARGET_LDFLAGS)" \
+		CPPFLAGS="$(TARGET_CPPFLAGS)"
 endef
 
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR)
+	$(MAKE) -C $(PKG_BUILD_DIR) \
+		CC="$(TARGET_CC)" \
+		CFLAGS="$(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include" \
+		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib"
 endef
 
 define Package/chan_quectel/install
@@ -116,7 +117,7 @@ PKGEOF
           
           echo "Building chan_quectel package..."
           make package/feeds/custom/chan_quectel/prepare -j$(nproc)
-          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc 2>&1 | tail -100
+          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
 
       - name: Find and copy IPK
         run: |
@@ -127,19 +128,12 @@ PKGEOF
           echo "=== Searching for IPK files ==="
           find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -type f
           
-          # Copy all chan_quectel IPK files
           find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -exec cp {} /tmp/output/ \;
           
-          # Also try to copy .so if build was successful
           find "$SDK_PATH/build_dir" -name "chan_quectel.so" -exec cp {} /tmp/output/ \;
           
           echo "=== Output files ==="
           ls -lah /tmp/output/
-          
-          if [ ! -f /tmp/output/*.ipk ] 2>/dev/null && [ ! -f /tmp/output/*.so ] 2>/dev/null; then
-            echo "WARNING: No IPK or SO found!"
-            find "$SDK_PATH" -name "*chan_quectel*" -type f 2>/dev/null | head -20
-          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
