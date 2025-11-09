@@ -47,7 +47,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -d n asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl libcurl
 
-      - name: Create chan_quectel package directory
+      - name: Create chan_quectel package
         run: |
           SDK_PATH=$(cat /tmp/sdk_path.txt)
           mkdir -p "$SDK_PATH/package/feeds/custom"
@@ -55,12 +55,13 @@ jobs:
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           rm -f "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
 
-      - name: Create OpenWrt package Makefile
+      - name: Create Makefile for chan_quectel
+        env:
+          ASTERISK_VER: ${{ github.event.inputs.asterisk_version }}
         run: |
           SDK_PATH=$(cat /tmp/sdk_path.txt)
-          mkdir -p "$SDK_PATH/package/feeds/custom/chan_quectel"
           
-          cat > "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile" << 'EOF'
+          cat > "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile" << 'MAKEFILE_EOF'
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=chan_quectel
@@ -86,9 +87,7 @@ define Package/chan_quectel/description
 endef
 
 define Build/Configure
-	cd $(PKG_BUILD_DIR)
-	./bootstrap
-	./configure --with-astversion=${{ github.event.inputs.asterisk_version }}
+	cd $(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$(ASTERISK_VER)
 endef
 
 define Build/Compile
@@ -101,21 +100,29 @@ define Package/chan_quectel/install
 endef
 
 $(eval $(call BuildPackage,chan_quectel))
-EOF
+MAKEFILE_EOF
+          
+          sed -i "s/\$(ASTERISK_VER)/$ASTERISK_VER/g" "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
+          echo "=== Makefile created ==="
+          head -20 "$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
 
       - name: Build package
         run: |
           SDK_PATH=$(cat /tmp/sdk_path.txt)
           cd "$SDK_PATH"
+          echo "=== Building chan_quectel for Asterisk ${{ github.event.inputs.asterisk_version }} ==="
           make package/feeds/custom/chan_quectel/prepare -j$(nproc)
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
 
-      - name: Copy IPK artifact
+      - name: Find and upload IPK
         run: |
           SDK_PATH=$(cat /tmp/sdk_path.txt)
           mkdir -p /tmp/artifacts
-          find "$SDK_PATH/bin/packages" -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
-          ls -lah /tmp/artifacts/ || echo "No IPK files found"
+          echo "=== Searching for IPK files ==="
+          find "$SDK_PATH/bin/packages" -type f -name "*.ipk" | grep chan_quectel || echo "No IPK found in default location"
+          find "$SDK_PATH" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          echo "=== Artifacts ==="
+          ls -lah /tmp/artifacts/ || echo "No artifacts found"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
