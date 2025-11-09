@@ -21,41 +21,66 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget tar gzip build-essential libncurses-dev zlib1g-dev gawk git
+          sudo apt-get install -y wget tar gzip build-essential libncurses-dev zlib1g-dev gawk git flex bison
 
       - name: Download OpenWrt SDK
         run: |
           cd /tmp
-          wget https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          wget -q https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
           tar -xf *.tar.xz
-          ls -d openwrt-sdk-* | head -1 > /tmp/sdk_dir.txt
-          SDK_DIR=$(cat /tmp/sdk_dir.txt)
+          SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
           echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
 
-      - name: Prepare SDK
+      - name: Setup SDK minimal
         run: |
           cd "$SDK_PATH"
-          pwd
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # Update only necessary feeds
+          ./scripts/feeds update packages
+          ./scripts/feeds install asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel libopenssl-devel
 
       - name: Add chan_quectel
         run: |
           cd "$SDK_PATH"
           mkdir -p feeds/custom
           cp -r $GITHUB_WORKSPACE feeds/custom/chan_quectel
-          ./scripts/feeds install chan_quectel asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel
+          
+          # Add custom feed to feeds.conf
+          echo "src-git custom file://feeds/custom" >> feeds.conf.default
+          
+          # Install from custom feed
+          ./scripts/feeds update custom
+          ./scripts/feeds install -p custom chan_quectel
 
-      - name: Build chan_quectel
+      - name: Build directly with make
         run: |
           cd "$SDK_PATH"
-          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
+          # Build chan_quectel directly
+          cd feeds/custom/chan_quectel
+          
+          # Check Asterisk version
+          ASTERISK_VER=${{ github.event.inputs.asterisk_version }}
+          
+          # Compile
+          make -f Makefile ASTERISK_VER=$ASTERISK_VER
+          
+          # If Makefile doesn't work, try autotools
+          if [ ! -f Makefile ]; then
+            ./bootstrap
+            ./configure --with-astversion=$ASTERISK_VER
+            make
+          fi
 
-      - name: Prepare artifacts
+      - name: Copy compiled module
         run: |
           mkdir -p /tmp/artifacts
-          cd "$SDK_PATH"
-          find bin/packages -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          
+          # Find the built .so file
+          find "$SDK_PATH" -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
+          
+          # Also look for .o files
+          find "$SDK_PATH" -path "*chan_quectel*.o" -exec cp {} /tmp/artifacts/ \;
+          
+          echo "=== Built files ==="
           ls -lah /tmp/artifacts/
 
       - name: Upload artifacts
