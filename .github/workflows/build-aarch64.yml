@@ -28,31 +28,33 @@ jobs:
           cd /tmp
           wget https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
           tar -xf *.tar.xz
-          cd openwrt-sdk-*
-          echo "SDK_PATH=$(pwd)" >> $GITHUB_ENV
+          ls -d openwrt-sdk-* | head -1 > /tmp/sdk_dir.txt
+          SDK_DIR=$(cat /tmp/sdk_dir.txt)
+          echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
 
       - name: Prepare SDK
         run: |
-          cd $SDK_PATH
+          cd "$SDK_PATH"
+          pwd
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Add chan_quectel
         run: |
-          cd $SDK_PATH
+          cd "$SDK_PATH"
           mkdir -p feeds/custom
           cp -r $GITHUB_WORKSPACE feeds/custom/chan_quectel
           ./scripts/feeds install chan_quectel asterisk${{ github.event.inputs.asterisk_version }} asterisk${{ github.event.inputs.asterisk_version }}-devel
 
       - name: Build chan_quectel
         run: |
-          cd $SDK_PATH
+          cd "$SDK_PATH"
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=sc
 
       - name: Prepare artifacts
         run: |
           mkdir -p /tmp/artifacts
-          cd $SDK_PATH
+          cd "$SDK_PATH"
           find bin/packages -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
           ls -lah /tmp/artifacts/
 
