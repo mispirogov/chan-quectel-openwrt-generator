@@ -25,129 +25,116 @@ jobs:
 
       - name: Download and extract SDK
         run: |
+          set -e
           cd /tmp
           echo "Downloading OpenWrt SDK..."
           wget -q https://downloads.openwrt.org/releases/24.10.4/targets/rockchip/armv8/openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           zstd -d openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           tar -xf openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar
           SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
-          echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
+          echo "SDK_PATH=/tmp/$SDK_DIR" >> "$GITHUB_ENV"
 
       - name: Setup feeds
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           cd "$SDK_PATH"
           ./scripts/feeds update -a
-          ./scripts/feeds install asterisk-${{ inputs.asterisk_version }}
+          ./scripts/feeds install asterisk${{ inputs.asterisk_version }}
+          ./scripts/feeds install asterisk${{ inputs.asterisk_version }}-dev
+          ./scripts/feeds install openssl libiconv-full alsa-lib libusb-1.0
 
       - name: Clone chan_quectel
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           mkdir -p "$SDK_PATH/package/feeds/custom"
           cd "$SDK_PATH/package/feeds/custom"
           git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
           rm -f chan_quectel/Makefile
-          rm -rf chan_quectel/openwrt  # Remove conflicting subdirectory
+          rm -rf chan_quectel/openwrt
 
       - name: Create Makefile for chan_quectel
         env:
+          SDK_PATH: ${{ env.SDK_PATH }}
           AST_VERSION: ${{ inputs.asterisk_version }}
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           MF="$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
-          
-          echo 'include $(TOPDIR)/rules.mk' > "$MF"
-          echo '' >> "$MF"
-          echo 'PKG_NAME:=chan_quectel' >> "$MF"
-          echo 'PKG_VERSION:=master' >> "$MF"
-          echo 'PKG_RELEASE:=1' >> "$MF"
-          echo 'PKG_SOURCE_PROTO:=git' >> "$MF"
-          echo 'PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git' >> "$MF"
-          echo 'PKG_SOURCE_VERSION:=master' >> "$MF"
-          echo 'PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)' >> "$MF"
-          echo '' >> "$MF"
-          echo 'include $(INCLUDE_DIR)/package.mk' >> "$MF"
-          echo '' >> "$MF"
-          echo 'define Package/chan_quectel' >> "$MF"
-          echo '  SECTION:=telephony' >> "$MF"
-          echo '  CATEGORY:=Telephony' >> "$MF"
-          echo "  DEPENDS:=+asterisk-$AST_VERSION +libopenssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
-          echo '  TITLE:=Asterisk channel driver for Quectel' >> "$MF"
-          echo '  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel' >> "$MF"
-          echo 'endef' >> "$MF"
-          echo '' >> "$MF"
-          echo 'define Package/chan_quectel/description' >> "$MF"
-          echo '  Asterisk channel driver for Quectel LTE modems' >> "$MF"
-          echo 'endef' >> "$MF"
-          echo '' >> "$MF"
-          echo 'define Build/Configure' >> "$MF"
-          echo -e "\tcd \$(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$AST_VERSION --with-asterisk=\$(STAGING_DIR)/usr --with-iconv=\$(STAGING_DIR)/usr" >> "$MF"
-          echo 'endef' >> "$MF"
-          echo '' >> "$MF"
-          echo 'define Build/Compile' >> "$MF"
-          echo -e '\t$(MAKE) -C $(PKG_BUILD_DIR)' >> "$MF"
-          echo 'endef' >> "$MF"
-          echo '' >> "$MF"
-          echo 'define Package/chan_quectel/install' >> "$MF"
-          echo -e '\t$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' >> "$MF"
-          echo -e '\t$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' >> "$MF"
-          echo 'endef' >> "$MF"
-          echo '' >> "$MF"
-          echo '$(eval $(call BuildPackage,chan_quectel))' >> "$MF"
+          cat > "$MF" <<'EOF'
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=chan_quectel
+PKG_VERSION:=master
+PKG_RELEASE:=1
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
+PKG_SOURCE_VERSION:=master
+PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+
+include $(INCLUDE_DIR)/package.mk
+
+# ASTVER will be replaced by sed from the workflow
+define Package/chan_quectel
+  SECTION:=telephony
+  CATEGORY:=Telephony
+  DEPENDS:=+asteriskASTVER +asteriskASTVER-dev +openssl +libiconv-full +alsa-lib +libusb-1.0
+  TITLE:=Asterisk channel driver for Quectel
+  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
+endef
+
+define Package/chan_quectel/description
+  Asterisk channel driver for Quectel LTE modems
+endef
+
+define Build/Configure
+	( cd $(PKG_BUILD_DIR); ./bootstrap; \
+	  ./configure --with-astversion=ASTVER --with-asterisk=$(STAGING_DIR)/usr --with-iconv=$(STAGING_DIR)/usr )
+endef
+
+define Build/Compile
+	$(MAKE) -C $(PKG_BUILD_DIR)
+endef
+
+define Package/chan_quectel/install
+	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
+endef
+
+$(eval $(call BuildPackage,chan_quectel))
+EOF
+          sed -i "s/ASTVER/${AST_VERSION}/g" "$MF"
 
       - name: Prepare SDK (skip menuconfig)
-        env:
-          AST_VERSION: ${{ inputs.asterisk_version }}
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           cd "$SDK_PATH"
-          
-          # Create minimal .config with dependencies
           touch .config
-          echo "CONFIG_PACKAGE_asterisk-$AST_VERSION=m" >> .config
+          echo "CONFIG_PACKAGE_asterisk${{ inputs.asterisk_version }}=m" >> .config
+          echo "CONFIG_PACKAGE_asterisk${{ inputs.asterisk_version }}-dev=m" >> .config
           echo "CONFIG_PACKAGE_chan_quectel=m" >> .config
-          echo "CONFIG_PACKAGE_libopenssl=m" >> .config
+          echo "CONFIG_PACKAGE_openssl=m" >> .config
           echo "CONFIG_PACKAGE_libiconv-full=m" >> .config
           echo "CONFIG_PACKAGE_alsa-lib=m" >> .config
           echo "CONFIG_PACKAGE_libusb-1.0=m" >> .config
-          
-          # Run defconfig to expand config
           make defconfig V=s
 
       - name: Build chan_quectel
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           cd "$SDK_PATH"
-          
-          echo "=== Building dependencies ==="
-          make package/feeds/telephony/asterisk-${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
-          
-          echo "=== Building chan_quectel ==="
-          make package/feeds/custom/chan_quectel/download V=s
-          make package/feeds/custom/chan_quectel/prepare V=s
-          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=s
+          echo "=== Building chan_quectel (all deps auto-built) ==="
+          make package/feeds/custom/chan_quectel/compile -j"$(nproc)" V=s
 
       - name: Find and collect artifacts
         run: |
-          SDK_PATH=${{ env.SDK_PATH }}
+          set -e
           mkdir -p /tmp/artifacts
-          
-          echo "=== Searching for compiled files ==="
-          find "$SDK_PATH" -type f \( -name "*chan_quectel*.ipk" -o -name "chan_quectel.so" \) -print0 | xargs -0 ls -lah
-          
-          # Copy IPK files
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          
-          # Copy compiled .so as fallback
-          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          
-          echo ""
-          echo "=== Artifacts found ==="
-          ls -lah /tmp/artifacts/ || echo "No artifacts found"
+          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
+          ls -lah /tmp/artifacts/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chan-quectel-aarch64_cortex-a53-${{ inputs.asterisk_version }}
+          name: chan-quectel-aarch64_cortex-a53-asterisk${{ inputs.asterisk_version }}
           path: /tmp/artifacts/
           retention-days: 7
