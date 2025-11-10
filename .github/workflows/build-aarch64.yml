@@ -126,8 +126,8 @@ EOF
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           mkdir -p /tmp/artifacts
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \; 
-          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \; 
+          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
           ls -lah /tmp/artifacts/
 
       - name: Upload artifact
