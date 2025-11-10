@@ -119,15 +119,15 @@ EOF
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
-          echo "=== Building chan_quectel (all deps will be built automatically) ==="
+          echo "=== Building chan_quectel (all deps auto-built) ==="
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=s
 
       - name: Find and collect artifacts
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           mkdir -p /tmp/artifacts
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \; 
-          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \; 
+          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
+          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
           ls -lah /tmp/artifacts/
 
       - name: Upload artifact
