@@ -58,46 +58,46 @@ jobs:
           SDK_PATH=${{ env.SDK_PATH }}
           MF="$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
           
-          cat > "$MF" << 'EOF'
-include $(TOPDIR)/rules.mk
+          cat > "$MF" <<-'EOF'
+	include $(TOPDIR)/rules.mk
 
-PKG_NAME:=chan_quectel
-PKG_VERSION:=master
-PKG_RELEASE:=1
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
-PKG_SOURCE_VERSION:=master
-PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+	PKG_NAME:=chan_quectel
+	PKG_VERSION:=master
+	PKG_RELEASE:=1
+	PKG_SOURCE_PROTO:=git
+	PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
+	PKG_SOURCE_VERSION:=master
+	PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
-include $(INCLUDE_DIR)/package.mk
+	include $(INCLUDE_DIR)/package.mk
 
-define Package/chan_quectel
-  SECTION:=telephony
-  CATEGORY:=Telephony
-  DEPENDS:=+asterisk$(AST_VERSION) +asterisk$(AST_VERSION)-dev +openssl +libiconv-full +alsa-lib +libusb-1.0
-  TITLE:=Asterisk channel driver for Quectel
-  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
-endef
+	define Package/chan_quectel
+	  SECTION:=telephony
+	  CATEGORY:=Telephony
+	  DEPENDS:=+asterisk$(AST_VERSION) +asterisk$(AST_VERSION)-dev +openssl +libiconv-full +alsa-lib +libusb-1.0
+	  TITLE:=Asterisk channel driver for Quectel
+	  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
+	endef
 
-define Package/chan_quectel/description
-  Asterisk channel driver for Quectel LTE modems
-endef
+	define Package/chan_quectel/description
+	  Asterisk channel driver for Quectel LTE modems
+	endef
 
-define Build/Configure
-	cd $(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$(AST_VERSION) --with-asterisk=$(STAGING_DIR)/usr --with-iconv=$(STAGING_DIR)/usr
-endef
+	define Build/Configure
+		cd $(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$(AST_VERSION) --with-asterisk=$(STAGING_DIR)/usr --with-iconv=$(STAGING_DIR)/usr
+	endef
 
-define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR)
-endef
+	define Build/Compile
+		$(MAKE) -C $(PKG_BUILD_DIR)
+	endef
 
-define Package/chan_quectel/install
-	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
-endef
+	define Package/chan_quectel/install
+		$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
+		$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
+	endef
 
-$(eval $(call BuildPackage,chan_quectel))
-EOF
+	$(eval $(call BuildPackage,chan_quectel))
+	EOF
 
       - name: Prepare SDK (skip menuconfig)
         env:
