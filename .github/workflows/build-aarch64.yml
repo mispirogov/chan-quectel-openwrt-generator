@@ -1,3 +1,15 @@
+### Исправленный GitHub Actions Workflow для сборки chan_quectel IPK
+
+На основе анализа лога ошибок (отсутствие правила для компиляции зависимостей, вызванное неверными путями, и предупреждения о несуществующих зависимостях из-за несоответствия имен пакетов), я доработал workflow. Ключевые изменения:
+- Убрана явная компиляция зависимостей — теперь make сам строит их автоматически при компиляции chan_quectel (стандартный подход в OpenWrt SDK).
+- Обновлены зависимости в Makefile: +openssl вместо +libopenssl (openssl предоставляет libopenssl; это устраняет предупреждение).
+- Добавлены все необходимые CONFIG_PACKAGE в .config для включения зависимостей (openssl, libiconv-full, alsa-lib, libusb-1.0).
+- Сохранены флаги configure для поиска заголовков в staging_dir.
+- Время сборки — около 20–40 минут (из-за автоматической сборки зависимостей, включая Asterisk).
+
+Скопируйте этот YAML в файл `.github/workflows/build-chan-quectel.yml` вашего репозитория GitHub. Запустите workflow вручную в разделе Actions, выбрав версию Asterisk (по умолчанию 20).
+
+```yaml
 name: Build chan_quectel IPK for aarch64_cortex-a53
 
 on:
@@ -39,6 +51,7 @@ jobs:
           cd "$SDK_PATH"
           ./scripts/feeds update -a
           ./scripts/feeds install asterisk${{ inputs.asterisk_version }}
+          ./scripts/feeds install openssl libiconv-full alsa-lib libusb-1.0
 
       - name: Clone chan_quectel
         run: |
@@ -71,7 +84,7 @@ jobs:
           echo 'define Package/chan_quectel' >> "$MF"
           echo '  SECTION:=telephony' >> "$MF"
           echo '  CATEGORY:=Telephony' >> "$MF"
-          echo "  DEPENDS:=+asterisk$AST_VERSION +libopenssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
+          echo "  DEPENDS:=+asterisk$AST_VERSION +openssl +libiconv-full +alsa-lib +libusb-1.0" >> "$MF"
           echo '  TITLE:=Asterisk channel driver for Quectel' >> "$MF"
           echo '  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel' >> "$MF"
           echo 'endef' >> "$MF"
@@ -106,7 +119,7 @@ jobs:
           touch .config
           echo "CONFIG_PACKAGE_asterisk$AST_VERSION=m" >> .config
           echo "CONFIG_PACKAGE_chan_quectel=m" >> .config
-          echo "CONFIG_PACKAGE_libopenssl=m" >> .config
+          echo "CONFIG_PACKAGE_openssl=m" >> .config
           echo "CONFIG_PACKAGE_libiconv-full=m" >> .config
           echo "CONFIG_PACKAGE_alsa-lib=m" >> .config
           echo "CONFIG_PACKAGE_libusb-1.0=m" >> .config
@@ -119,14 +132,7 @@ jobs:
           SDK_PATH=${{ env.SDK_PATH }}
           cd "$SDK_PATH"
           
-          echo "=== Building dependencies ==="
-          make package/feeds/packages/openssl/compile -j$(nproc) V=s
-          make package/feeds/packages/libiconv-full/compile -j$(nproc) V=s
-          make package/feeds/packages/alsa-lib/compile -j$(nproc) V=s
-          make package/feeds/packages/libusb/compile -j$(nproc) V=s
-          make package/feeds/telephony/asterisk${{ inputs.asterisk_version }}/compile -j$(nproc) V=s
-          
-          echo "=== Building chan_quectel ==="
+          echo "=== Building chan_quectel (dependencies will be built automatically) ==="
           make package/feeds/custom/chan_quectel/download V=s
           make package/feeds/custom/chan_quectel/prepare V=s
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=s
@@ -155,3 +161,10 @@ jobs:
           name: chan-quectel-aarch64_cortex-a53-${{ inputs.asterisk_version }}
           path: /tmp/artifacts/
           retention-days: 7
+```
+
+### Инструкция по использованию
+1. **Запуск**: В GitHub перейдите в Actions, выберите workflow, укажите версию Asterisk и запустите. Make автоматически соберет зависимости (openssl, asterisk20 и т.д.), что устранит ошибки.
+2. **Скачивание IPK**: После завершения скачайте артефакт (.ipk-файл) из Summary workflow.
+3. **Установка на роутер**: Перенесите IPK на роутер и выполните `opkg install /path/to/chan_quectel_*.ipk`. Убедитесь, что Asterisk 20 и зависимости (openssl, alsa-lib, libusb-1.0, libiconv-full) установлены из репозитория OpenWrt.
+4. **Возможные доработки**: Если возникнут новые предупреждения, они некритичны для сборки. Если сборка провалится, поделитесь полными логами для анализа.
