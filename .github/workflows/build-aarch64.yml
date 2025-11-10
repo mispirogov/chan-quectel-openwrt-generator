@@ -101,7 +101,6 @@ endef
 
 $(eval $(call BuildPackage,chan_quectel))
 EOF
-          # Подставляем версию Asterisk в Makefile
           sed -i "s/ASTVER/${AST_VERSION}/g" "$MF"
 
       - name: Prepare SDK (skip menuconfig)
