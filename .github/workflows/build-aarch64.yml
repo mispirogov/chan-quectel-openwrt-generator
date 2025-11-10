@@ -57,7 +57,7 @@ jobs:
         run: |
           SDK_PATH=${{ env.SDK_PATH }}
           MF="$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
-          
+
           cat > "$MF" <<-'EOF'
 	include $(TOPDIR)/rules.mk
 
