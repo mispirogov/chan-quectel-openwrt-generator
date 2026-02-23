@@ -50,11 +50,10 @@ jobs:
           echo "=== src files ==="
           ls -la package/feeds/custom/chan_quectel/src | sed -n '1,200p'
 
-      - name: Write OpenWrt package Makefile (TAB-safe, build via TARGET_CC -shared)
+      - name: Write OpenWrt package Makefile (fixed quoting + build via TARGET_CC)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-
           python3 - <<'PY'
           from pathlib import Path
 
@@ -84,50 +83,47 @@ jobs:
             "endef",
             "",
             "define Build/Prepare",
-            "\\t$(call Build/Prepare/Default)",
-            "\\t$(CP) ./src/* $(PKG_BUILD_DIR)/",
+            "\t$(call Build/Prepare/Default)",
+            "\t$(CP) ./src/* $(PKG_BUILD_DIR)/",
             "endef",
             "",
+            # ВАЖНО: один shell-блок, без \" в итоговом Makefile
             "define Build/Compile",
-            "\\tSRC=\\\"$$(ls $(PKG_BUILD_DIR)/*.c 2>/dev/null | head -n1)\\\"; \\\\",
-            "\\ttest -n \\\"$$SRC\\\"; \\\\",
-            "\\techo \\\"Building from $$SRC\\\"; \\\\",
-            "\\t$(TARGET_CC) -shared -fPIC \\\\",
-            "\\t\\t$(TARGET_CFLAGS) $(EXTRA_CFLAGS) \\\\",
-            "\\t\\t-I$(STAGING_DIR)/usr/include \\\\",
-            "\\t\\t-I$(STAGING_DIR)/usr/include/asterisk \\\\",
-            "\\t\\t-I$(STAGING_DIR)/usr/include/libusb-1.0 \\\\",
-            "\\t\\t-o $(PKG_BUILD_DIR)/chan_quectel.so \\\\",
-            "\\t\\t\\\"$$SRC\\\" \\\\",
-            "\\t\\t-L$(STAGING_DIR)/usr/lib \\\\",
-            "\\t\\t-lusb-1.0 -lasound -lssl -lcrypto",
+            "\t@set -eux; \\",
+            "\t  echo '=== build dir files ==='; \\",
+            "\t  ls -la \"$(PKG_BUILD_DIR)\"; \\",
+            "\t  SRC=\"$$(ls \"$(PKG_BUILD_DIR)\"/*.c 2>/dev/null | head -n1)\"; \\",
+            "\t  test -n \"$$SRC\"; \\",
+            "\t  echo \"Building from $$SRC\"; \\",
+            "\t  $(TARGET_CC) -shared -fPIC \\",
+            "\t    $(TARGET_CFLAGS) $(EXTRA_CFLAGS) \\",
+            "\t    -I$(STAGING_DIR)/usr/include \\",
+            "\t    -I$(STAGING_DIR)/usr/include/asterisk \\",
+            "\t    -I$(STAGING_DIR)/usr/include/libusb-1.0 \\",
+            "\t    -o \"$(PKG_BUILD_DIR)/chan_quectel.so\" \"$$SRC\" \\",
+            "\t    -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto;",
             "endef",
             "",
             "define Package/chan_quectel/install",
-            "\\t$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules",
-            "\\t$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/",
+            "\t$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules",
+            "\t$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/",
             "endef",
             "",
             "$(eval $(call BuildPackage,chan_quectel))",
             "",
           ]
 
-          # ВАЖНО: превращаем последовательности "\t" в реальный TAB
-          out = []
-          for ln in lines:
-            out.append(ln.replace("\\t", "\t"))
-
-          mf.write_text("\n".join(out), encoding="utf-8")
+          mf.write_text("\n".join(lines), encoding="utf-8")
           print("Wrote", mf)
           PY
 
-          # страховка: убрать CRLF и заменить пробелы перед $(...) на TAB
+          # страховка: CRLF -> LF и TAB для строк с $(...)
           MF="package/feeds/custom/chan_quectel/Makefile"
           sed -i 's/\r$//' "$MF"
           perl -pi -e 's/^ +(?=\$\()/\t/' "$MF"
 
-          echo "=== Makefile 35..80 ==="
-          nl -ba "$MF" | sed -n '35,80p'
+          echo "=== Makefile (35..95) ==="
+          nl -ba "$MF" | sed -n '35,95p'
 
       - name: Minimal .config (no menuconfig)
         working-directory: ${{ env.SDK_DIR }}
