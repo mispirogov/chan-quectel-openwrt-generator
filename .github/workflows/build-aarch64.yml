@@ -30,7 +30,6 @@ jobs:
           tar --use-compress-program=unzstd -xf sdk.tar.zst
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/openwrt-sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
-          echo "Using SDK_DIR=$SDK_DIR"
 
       - name: Update & install feeds
         working-directory: ${{ env.SDK_DIR }}
@@ -47,10 +46,12 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan_quectel_src
           rsync -a --delete /tmp/chan_quectel_src/ package/feeds/custom/chan_quectel/src/
-          echo "=== src files ==="
+          echo "=== src files (repo) ==="
           ls -la package/feeds/custom/chan_quectel/src | sed -n '1,200p'
+          echo "=== find *.c (repo) ==="
+          find package/feeds/custom/chan_quectel/src -maxdepth 3 -type f -name '*.c' -print || true
 
-      - name: Write OpenWrt package Makefile (fixed quoting + build via TARGET_CC)
+      - name: Write OpenWrt package Makefile (fix SRC find + link to libopenssl)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -75,7 +76,8 @@ jobs:
             "  CATEGORY:=Network",
             "  SUBMENU:=Telephony",
             "  TITLE:=Asterisk channel driver for Quectel LTE modems",
-            "  DEPENDS:=+asterisk20 +openssl +libiconv-full +alsa-lib +libusb-1.0",
+            # ВАЖНО: для -lssl/-lcrypto нужен libopenssl (а не openssl tools)
+            "  DEPENDS:=+asterisk20 +libopenssl +libiconv-full +alsa-lib +libusb-1.0",
             "endef",
             "",
             "define Package/chan_quectel/description",
@@ -87,14 +89,20 @@ jobs:
             "\t$(CP) ./src/* $(PKG_BUILD_DIR)/",
             "endef",
             "",
-            # ВАЖНО: один shell-блок, без \" в итоговом Makefile
             "define Build/Compile",
             "\t@set -eux; \\",
             "\t  echo '=== build dir files ==='; \\",
             "\t  ls -la \"$(PKG_BUILD_DIR)\"; \\",
-            "\t  SRC=\"$$(ls \"$(PKG_BUILD_DIR)\"/*.c 2>/dev/null | head -n1)\"; \\",
+            "\t  echo '=== find *.c in build dir ==='; \\",
+            "\t  find \"$(PKG_BUILD_DIR)\" -maxdepth 3 -type f -name '*.c' -print || true; \\",
+            # Сначала ищем chan_quectel.c, если нет — любой .c
+            "\t  SRC=\"$$(find \"$(PKG_BUILD_DIR)\" -maxdepth 3 -type f -name 'chan_quectel.c' -print -quit)\"; \\",
+            "\t  if [ -z \"$$SRC\" ]; then SRC=\"$$(find \"$(PKG_BUILD_DIR)\" -maxdepth 3 -type f -name '*.c' -print -quit)\"; fi; \\",
             "\t  test -n \"$$SRC\"; \\",
             "\t  echo \"Building from $$SRC\"; \\",
+            # Проверим, что libssl/libcrypto реально появились в staging
+            "\t  echo '=== check openssl libs in staging ==='; \\",
+            "\t  ls -la \"$(STAGING_DIR)/usr/lib\" | grep -E 'lib(ssl|crypto)\\.so' || true; \\",
             "\t  $(TARGET_CC) -shared -fPIC \\",
             "\t    $(TARGET_CFLAGS) $(EXTRA_CFLAGS) \\",
             "\t    -I$(STAGING_DIR)/usr/include \\",
@@ -117,13 +125,13 @@ jobs:
           print("Wrote", mf)
           PY
 
-          # страховка: CRLF -> LF и TAB для строк с $(...)
+          # страховка: CRLF -> LF и пробелы перед $(...) -> TAB
           MF="package/feeds/custom/chan_quectel/Makefile"
           sed -i 's/\r$//' "$MF"
           perl -pi -e 's/^ +(?=\$\()/\t/' "$MF"
 
-          echo "=== Makefile (35..95) ==="
-          nl -ba "$MF" | sed -n '35,95p'
+          echo "=== Makefile (35..110) ==="
+          nl -ba "$MF" | sed -n '35,110p'
 
       - name: Minimal .config (no menuconfig)
         working-directory: ${{ env.SDK_DIR }}
@@ -135,13 +143,21 @@ jobs:
           CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y
 
           CONFIG_PACKAGE_asterisk20=y
-          CONFIG_PACKAGE_openssl=y
+          CONFIG_PACKAGE_libopenssl=y
           CONFIG_PACKAGE_libiconv-full=y
           CONFIG_PACKAGE_alsa-lib=y
           CONFIG_PACKAGE_libusb-1.0=y
           CONFIG_PACKAGE_chan_quectel=y
           EOF
           make defconfig
+
+      # ВАЖНО: сначала собираем зависимости, чтобы они попали в staging_dir
+      - name: Build deps into staging (asterisk20 + libopenssl)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          make package/feeds/telephony/asterisk20/compile -j"$(nproc)" V=s
+          make package/feeds/packages/libopenssl/compile -j"$(nproc)" V=s
 
       - name: Build chan_quectel (IPK)
         working-directory: ${{ env.SDK_DIR }}
