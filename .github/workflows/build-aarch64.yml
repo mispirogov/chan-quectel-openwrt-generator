@@ -44,10 +44,10 @@ jobs:
           set -eux
           rm -rf package/feeds/custom/chan_quectel
           mkdir -p package/feeds/custom/chan_quectel/src
-          git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan_src
-          rsync -a --delete /tmp/chan_src/ package/feeds/custom/chan_quectel/src/
+          git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/src
+          rsync -a --delete /tmp/src/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write OpenWrt package Makefile
+      - name: Write OpenWrt package Makefile (fixed python)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -76,7 +76,7 @@ lines = [
 "endef",
 "",
 "define Package/chan_quectel/description",
-"  Asterisk channel driver for Quectel LTE modems.",
+"  Asterisk channel driver (chan_quectel) for Quectel LTE modems.",
 "endef",
 "",
 "define Build/Prepare",
@@ -112,14 +112,10 @@ mf.write_text("\n".join(lines), encoding="utf-8")
 print("Makefile written successfully")
 PY
 
-      - name: Remove CRLF if any
-        working-directory: ${{ env.SDK_DIR }}
-        run: |
-          sed -i 's/\r$//' package/feeds/custom/chan_quectel/Makefile
-
       - name: Minimal .config
         working-directory: ${{ env.SDK_DIR }}
         run: |
+          set -eux
           cat > .config <<'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
@@ -134,20 +130,23 @@ CONFIG_PACKAGE_chan_quectel=y
 EOF
           make defconfig
 
-      - name: Build IPK
+      - name: Build chan_quectel
         working-directory: ${{ env.SDK_DIR }}
         run: |
+          set -eux
           make package/feeds/custom/chan_quectel/compile -j$(nproc) V=s
 
       - name: Collect artifacts
         working-directory: ${{ env.SDK_DIR }}
         run: |
+          set -eux
           mkdir -p /tmp/artifacts
-          find bin/packages -name "chan_quectel_*.ipk" -exec cp {} /tmp/artifacts/ \;
-          find build_dir -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \; || true
+          find bin/packages -type f -name "chan_quectel_*.ipk" -exec cp -v {} /tmp/artifacts/ \;
+          find build_dir -type f -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
+          ls -la /tmp/artifacts
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: chan_quectel-ipk-aarch64
+          name: chan_quectel-ipk-aarch64_cortex-a53
           path: /tmp/artifacts/*
