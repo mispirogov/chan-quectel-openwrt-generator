@@ -1,4 +1,4 @@
-name: build-chan-quectel-ipk (aarch64_cortex-a53 / Ast20)
+name: build-chan_quectel-ipk (aarch64_cortex-a53 / Asterisk 20)
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
           tar --use-compress-program=unzstd -xf sdk.tar.zst
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/openwrt-sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
-          echo "Using SDK_DIR=$SDK_DIR"
+          echo "SDK unpacked: $SDK_DIR"
 
       - name: Update & install feeds
         working-directory: ${{ env.SDK_DIR }}
@@ -46,8 +47,10 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan_quectel_src
           rsync -a --delete /tmp/chan_quectel_src/ package/feeds/custom/chan_quectel/src/
+          echo "=== src files ==="
+          ls -la package/feeds/custom/chan_quectel/src | sed -n '1,200p'
 
-      - name: Write OpenWrt package Makefile (TAB-safe)
+      - name: Write OpenWrt package Makefile (TAB-safe, build via $(TARGET_CC) -shared)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -72,7 +75,7 @@ jobs:
             "  CATEGORY:=Network",
             "  SUBMENU:=Telephony",
             "  TITLE:=Asterisk channel driver for Quectel LTE modems",
-            "  DEPENDS:=+asterisk20 +asterisk20-dev +openssl +libiconv-full +alsa-lib +libusb-1.0",
+            "  DEPENDS:=+asterisk20 +openssl +libiconv-full +alsa-lib +libusb-1.0",
             "endef",
             "",
             "define Package/chan_quectel/description",
@@ -85,15 +88,18 @@ jobs:
             "endef",
             "",
             "define Build/Compile",
-            "\t$(MAKE) -C $(PKG_BUILD_DIR) \\",
-            "\t\tCC=\"$(TARGET_CC)\" \\",
-            "\t\tCXX=\"$(TARGET_CXX)\" \\",
-            "\t\tLD=\"$(TARGET_CXX)\" \\",
-            "\t\tAR=\"$(TARGET_AR)\" \\",
-            "\t\tRANLIB=\"$(TARGET_RANLIB)\" \\",
-            "\t\tSTRIP=\"$(TARGET_CROSS)strip\" \\",
-            "\t\tCFLAGS=\"$(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk\" \\",
-            "\t\tLDFLAGS=\"$(TARGET_LDFLAGS) $(EXTRA_LDFLAGS) -L$(STAGING_DIR)/usr/lib\"",
+            "\tSRC=\"$$(ls $(PKG_BUILD_DIR)/*.c 2>/dev/null | head -n1)\"; \\",
+            "\ttest -n \"$$SRC\"; \\",
+            "\techo \"Building from $$SRC\"; \\",
+            "\t$(TARGET_CC) -shared -fPIC \\",
+            "\t\t$(TARGET_CFLAGS) $(EXTRA_CFLAGS) \\",
+            "\t\t-I$(STAGING_DIR)/usr/include \\",
+            "\t\t-I$(STAGING_DIR)/usr/include/asterisk \\",
+            "\t\t-I$(STAGING_DIR)/usr/include/libusb-1.0 \\",
+            "\t\t-o $(PKG_BUILD_DIR)/chan_quectel.so \\",
+            "\t\t\"$$SRC\" \\",
+            "\t\t-L$(STAGING_DIR)/usr/lib \\",
+            "\t\t-lusb-1.0 -lasound -lssl -lcrypto",
             "endef",
             "",
             "define Package/chan_quectel/install",
@@ -105,34 +111,31 @@ jobs:
             "",
           ]
 
-          mf.write_text("\n".join(lines), encoding="utf-8")
-          print("Wrote", mf)
+          mf.write_text(\"\\n\".join(lines), encoding=\"utf-8\")
+          print(\"Wrote\", mf)
           PY
 
-      # ✅ Быстрое лечение: даже если Makefile “кривой” (пробелы/CRLF)
-      - name: Fix Makefile (spaces->TAB before $(...), remove CRLF)
+      - name: Fix Makefile (remove CRLF, spaces->TAB before $(...))
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           MF="package/feeds/custom/chan_quectel/Makefile"
-          # убрать CR (если есть)
           sed -i 's/\r$//' "$MF"
-          # заменить ведущие пробелы перед $(...) на TAB
           perl -pi -e 's/^ +(?=\$\()/\t/' "$MF"
 
-      - name: Debug Makefile (lines 35-60 + bytes of line 43)
+      - name: Debug Makefile (show line 35-80 + line43 bytes)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           MF="package/feeds/custom/chan_quectel/Makefile"
-          echo "==== SHOW 35..60 (with line numbers) ===="
-          nl -ba "$MF" | sed -n '35,60p'
+          echo "==== SHOW 35..80 ===="
+          nl -ba "$MF" | sed -n '35,80p'
           echo "==== BYTES of line 43 ===="
           python3 - <<'PY'
           mf="package/feeds/custom/chan_quectel/Makefile"
           with open(mf,"rb") as f:
               data=f.read().splitlines()
-          i=42  # line 43
+          i=42
           print("Total lines:", len(data))
           if len(data) > i:
               line=data[i]
@@ -151,7 +154,6 @@ jobs:
           CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y
 
           CONFIG_PACKAGE_asterisk20=y
-          CONFIG_PACKAGE_asterisk20-dev=y
           CONFIG_PACKAGE_openssl=y
           CONFIG_PACKAGE_libiconv-full=y
           CONFIG_PACKAGE_alsa-lib=y
@@ -173,6 +175,7 @@ jobs:
           mkdir -p /tmp/artifacts
           find bin/packages -type f -name "chan_quectel_*.ipk" -print -exec cp -v {} /tmp/artifacts/ \;
           find build_dir -type f -name "chan_quectel.so" -print -exec cp -v {} /tmp/artifacts/ \; || true
+          echo "=== artifacts ==="
           ls -la /tmp/artifacts
 
       - name: Upload artifacts
