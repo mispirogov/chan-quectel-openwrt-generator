@@ -1,111 +1,158 @@
-name: Build chan_quectel IPK for aarch64_cortex-a53
+name: build-chan-quectel-ipk (aarch64_cortex-a53)
+
 on:
   workflow_dispatch:
-    inputs:
-      asterisk_version:
-        description: 'Asterisk version'
-        required: true
-        default: '20'
-        type: choice
-        options:
-          - '18'
-          - '20'
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Install build tools
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk git wget tar gzip flex bison patch diffstat autoconf automake libtool libssl-dev zstd
-      - name: Download and extract SDK
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev \
+            file wget curl ca-certificates time
+
+      - name: Download OpenWrt SDK (24.10.4 / mediatek-filogic)
         run: |
-          cd /tmp
-          echo "Downloading OpenWrt SDK..."
-          wget -q https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          zstd -d openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          tar -xf openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar
-          SDK_DIR=$(ls -d openwrt-sdk-* | head -1)
-          echo "SDK_PATH=/tmp/$SDK_DIR" >> $GITHUB_ENV
-      - name: Setup feeds
+          set -eux
+          SDK_URL="https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          mkdir -p /tmp/openwrt-sdk
+          cd /tmp/openwrt-sdk
+          wget -O sdk.tar.zst "$SDK_URL"
+          tar --use-compress-program=unzstd -xf sdk.tar.zst
+          SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
+          echo "SDK_DIR=/tmp/openwrt-sdk/${SDK_DIR#./}" >> $GITHUB_ENV
+
+      - name: Update & install feeds
+        working-directory: ${{ env.SDK_DIR }}
         run: |
-          cd "$SDK_PATH"
+          set -eux
           ./scripts/feeds update -a
-          ./scripts/feeds install asterisk${{ inputs.asterisk_version }}
-          ./scripts/feeds install asterisk${{ inputs.asterisk_version }}-dev
-          ./scripts/feeds install openssl libiconv-full alsa-lib libusb-1.0
-      - name: Clone chan_quectel
+          ./scripts/feeds install -a
+
+      - name: Add chan_quectel as custom package + write OpenWrt Makefile (TAB-safe)
+        working-directory: ${{ env.SDK_DIR }}
         run: |
-          mkdir -p "$SDK_PATH/package/feeds/custom"
-          cd "$SDK_PATH/package/feeds/custom"
-          git clone https://github.com/IchthysMaranatha/asterisk-chan-quectel.git chan_quectel
-          rm -f chan_quectel/Makefile
-          rm -rf chan_quectel/openwrt
-      - name: Create Makefile for chan_quectel
-        env:
-          SDK_PATH: ${{ env.SDK_PATH }}
-          AST_VERSION: ${{ inputs.asterisk_version }}
-        run: |
-          MF="$SDK_PATH/package/feeds/custom/chan_quectel/Makefile"
-          cat > "$MF" <<-'EOF'
-          include $(TOPDIR)/rules.mk
+          set -eux
+
+          # 1) забираем исходники chan_quectel
+          rm -rf package/feeds/custom/chan_quectel
+          mkdir -p package/feeds/custom/chan_quectel
+          git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan_quectel_src
+
+          # чистим лишнее (на всякий)
+          rm -f /tmp/chan_quectel_src/Makefile || true
+
+          # 2) кладем исходники в "src" для OpenWrt package
+          mkdir -p package/feeds/custom/chan_quectel/src
+          rsync -a --delete /tmp/chan_quectel_src/ package/feeds/custom/chan_quectel/src/
+
+          # 3) пишем OpenWrt Package Makefile через python (TAB = \t)
+          python3 - <<'PY'
+          from pathlib import Path
+
+          mf = Path("package/feeds/custom/chan_quectel/Makefile")
+          content = r'''include $(TOPDIR)/rules.mk
+
           PKG_NAME:=chan_quectel
-          PKG_VERSION:=master
           PKG_RELEASE:=1
-          PKG_SOURCE_PROTO:=git
-          PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
-          PKG_SOURCE_VERSION:=master
-          PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+
+          PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
+
           include $(INCLUDE_DIR)/package.mk
+
           define Package/chan_quectel
-            SECTION:=telephony
-            CATEGORY:=Telephony
-            DEPENDS:=+asterisk$(AST_VERSION) +asterisk$(AST_VERSION)-dev +openssl +libiconv-full +alsa-lib +libusb-1.0
-            TITLE:=Asterisk channel driver for Quectel
-            URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
+            SECTION:=net
+            CATEGORY:=Network
+            SUBMENU:=Telephony
+            TITLE:=Asterisk channel driver for Quectel LTE modems
+            DEPENDS:=+asterisk20 +asterisk20-dev +openssl +libiconv-full +alsa-lib +libusb-1.0
           endef
+
           define Package/chan_quectel/description
-            Asterisk channel driver for Quectel LTE modems
+            Asterisk channel driver (chan_quectel) for Quectel LTE modems.
           endef
-          define Build/Configure
-          	cd $(PKG_BUILD_DIR); ./bootstrap; ./configure --with-astversion=$(AST_VERSION) --with-asterisk=$(STAGING_DIR)/usr --with-iconv=$(STAGING_DIR)/usr
+
+          define Build/Prepare
+          \t$(CP) ./src/* $(PKG_BUILD_DIR)/
           endef
+
           define Build/Compile
-          	$(MAKE) -C $(PKG_BUILD_DIR)
+          \t$(MAKE) -C $(PKG_BUILD_DIR) \
+          \t\tCC="$(TARGET_CC)" \
+          \t\tCXX="$(TARGET_CXX)" \
+          \t\tLD="$(TARGET_CXX)" \
+          \t\tAR="$(TARGET_AR)" \
+          \t\tRANLIB="$(TARGET_RANLIB)" \
+          \t\tSTRIP="$(TARGET_CROSS)strip" \
+          \t\tCFLAGS="$(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk" \
+          \t\tLDFLAGS="$(TARGET_LDFLAGS) $(EXTRA_LDFLAGS) -L$(STAGING_DIR)/usr/lib"
           endef
+
           define Package/chan_quectel/install
-          	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
-          	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
+          \t$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
+          \t$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
           endef
+
           $(eval $(call BuildPackage,chan_quectel))
+          '''
+          # Убираем ведущие пробелы, но TABы (\t) оставляем как есть
+          lines = [ln.rstrip() for ln in content.splitlines()]
+          # Нормализуем пустые строки в начале
+          while lines and lines[0] == "":
+            lines.pop(0)
+          mf.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("Wrote", mf)
+          PY
+
+          # 4) страховка от CRLF
+          file package/feeds/custom/chan_quectel/Makefile
+          sed -n '1,120p' package/feeds/custom/chan_quectel/Makefile | nl -ba
+
+      - name: Minimal .config (no menuconfig)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          cat > .config <<'EOF'
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y
+
+          CONFIG_PACKAGE_asterisk20=y
+          CONFIG_PACKAGE_asterisk20-dev=y
+          CONFIG_PACKAGE_openssl=y
+          CONFIG_PACKAGE_libiconv-full=y
+          CONFIG_PACKAGE_alsa-lib=y
+          CONFIG_PACKAGE_libusb-1.0=y
+          CONFIG_PACKAGE_chan_quectel=y
           EOF
-      - name: Prepare SDK (skip menuconfig)
+
+          make defconfig
+
+      - name: Build chan_quectel (IPK)
+        working-directory: ${{ env.SDK_DIR }}
         run: |
-          cd "$SDK_PATH"
-          touch .config
-          echo "CONFIG_PACKAGE_asterisk${{ inputs.asterisk_version }}=m" >> .config
-          echo "CONFIG_PACKAGE_asterisk${{ inputs.asterisk_version }}-dev=m" >> .config
-          echo "CONFIG_PACKAGE_chan_quectel=m" >> .config
-          echo "CONFIG_PACKAGE_openssl=m" >> .config
-          echo "CONFIG_PACKAGE_libiconv-full=m" >> .config
-          echo "CONFIG_PACKAGE_alsa-lib=m" >> .config
-          echo "CONFIG_PACKAGE_libusb-1.0=m" >> .config
-          make defconfig V=s
-      - name: Build chan_quectel
+          set -eux
+          make package/feeds/custom/chan_quectel/compile -j"$(nproc)" V=s
+
+      - name: Collect artifacts
+        working-directory: ${{ env.SDK_DIR }}
         run: |
-          cd "$SDK_PATH"
-          echo "=== Building chan_quectel (all deps auto-built) ==="
-          make package/feeds/custom/chan_quectel/compile -j$(nproc) V=s
-      - name: Find and collect artifacts
-        run: |
+          set -eux
           mkdir -p /tmp/artifacts
-          find "$SDK_PATH/bin/packages" -type f -name "*chan_quectel*.ipk" -exec cp {} /tmp/artifacts/ \;
-          find "$SDK_PATH/build_dir" -type f -name "chan_quectel.so" -exec cp {} /tmp/artifacts/ \;
-          ls -lah /tmp/artifacts/
-      - name: Upload artifact
+          find bin/packages -type f -name "chan_quectel_*.ipk" -exec cp -v {} /tmp/artifacts/ \;
+          find build_dir -type f -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
+          ls -la /tmp/artifacts
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: chan-quectel-aarch64_cortex-a53-asterisk${{ inputs.asterisk_version }}
-          path: /tmp/artifacts/
-          retention-days: 7
+          name: chan_quectel-ipk-aarch64_cortex-a53
+          path: /tmp/artifacts/*
