@@ -49,10 +49,10 @@ jobs:
           rsync -a --delete /tmp/chan_quectel_src/ package/feeds/custom/chan_quectel/src/
           echo "=== repo src top ==="
           ls -la package/feeds/custom/chan_quectel/src | sed -n '1,200p'
-          echo "=== repo src *.c (depth 4) ==="
-          find package/feeds/custom/chan_quectel/src -maxdepth 4 -type f -name '*.c' -print || true
+          echo "=== repo src *.c (depth 6) ==="
+          find package/feeds/custom/chan_quectel/src -maxdepth 6 -type f -name '*.c' -print || true
 
-      - name: Write OpenWrt package Makefile (build via TARGET_CC -shared)
+      - name: Write OpenWrt package Makefile (NO $(...) in shell; use backticks)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -94,12 +94,12 @@ jobs:
             "\t  echo '=== build dir files ==='; \\",
             "\t  ls -la \"$(PKG_BUILD_DIR)\"; \\",
             "\t  echo '=== find *.c in build dir ==='; \\",
-            "\t  find \"$(PKG_BUILD_DIR)\" -maxdepth 4 -type f -name '*.c' -print || true; \\",
-            "\t  SRC=\"$$(find \"$(PKG_BUILD_DIR)\" -maxdepth 4 -type f -name 'chan_quectel.c' -print -quit)\"; \\",
-            "\t  if [ -z \"$$SRC\" ]; then SRC=\"$$(find \"$(PKG_BUILD_DIR)\" -maxdepth 4 -type f -name '*.c' -print -quit)\"; fi; \\",
+            "\t  find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name '*.c' -print || true; \\",
+            "\t  SRC=\"`find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name 'chan_quectel.c' -print -quit`\"; \\",
+            "\t  if [ -z \"$$SRC\" ]; then SRC=\"`find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name '*.c' -print -quit`\"; fi; \\",
             "\t  test -n \"$$SRC\"; \\",
             "\t  echo \"Building from $$SRC\"; \\",
-            "\t  echo '=== check openssl libs in staging (after deps build) ==='; \\",
+            "\t  echo '=== check openssl libs in staging ==='; \\",
             "\t  ls -la \"$(STAGING_DIR)/usr/lib\" | grep -E 'lib(ssl|crypto)\\.so' || true; \\",
             "\t  $(TARGET_CC) -shared -fPIC \\",
             "\t    $(TARGET_CFLAGS) $(EXTRA_CFLAGS) \\",
@@ -128,8 +128,8 @@ jobs:
           sed -i 's/\r$//' "$MF"
           perl -pi -e 's/^ +(?=\$\()/\t/' "$MF"
 
-          echo "=== Makefile (35..120) ==="
-          nl -ba "$MF" | sed -n '35,120p'
+          echo "=== Makefile (45..120) ==="
+          nl -ba "$MF" | sed -n '45,120p'
 
       - name: Minimal .config (no menuconfig)
         working-directory: ${{ env.SDK_DIR }}
@@ -149,7 +149,7 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build chan_quectel (IPK) - deps will be built automatically
+      - name: Build chan_quectel (IPK) - deps build automatically
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
