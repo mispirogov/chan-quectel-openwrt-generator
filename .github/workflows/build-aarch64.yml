@@ -47,12 +47,12 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan_quectel_src
           rsync -a --delete /tmp/chan_quectel_src/ package/feeds/custom/chan_quectel/src/
-          echo "=== repo src top ==="
+          echo "=== src root ==="
           ls -la package/feeds/custom/chan_quectel/src | sed -n '1,200p'
-          echo "=== repo src *.c (depth 6) ==="
-          find package/feeds/custom/chan_quectel/src -maxdepth 6 -type f -name '*.c' -print || true
+          echo "=== search for chan_quectel.c in repo ==="
+          find package/feeds/custom/chan_quectel/src -maxdepth 6 -type f -name 'chan_quectel.c' -print || true
 
-      - name: Write OpenWrt package Makefile (NO $(...) in shell; use backticks)
+      - name: Write OpenWrt package Makefile (compile fixed file, no SRC guessing)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -86,19 +86,17 @@ jobs:
             "",
             "define Build/Prepare",
             "\t$(call Build/Prepare/Default)",
+            # копируем всё из ./src в build_dir
             "\t$(CP) ./src/* $(PKG_BUILD_DIR)/",
             "endef",
             "",
             "define Build/Compile",
             "\t@set -eux; \\",
-            "\t  echo '=== build dir files ==='; \\",
+            "\t  echo '=== build dir listing ==='; \\",
             "\t  ls -la \"$(PKG_BUILD_DIR)\"; \\",
-            "\t  echo '=== find *.c in build dir ==='; \\",
-            "\t  find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name '*.c' -print || true; \\",
-            "\t  SRC=\"`find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name 'chan_quectel.c' -print -quit`\"; \\",
-            "\t  if [ -z \"$$SRC\" ]; then SRC=\"`find \"$(PKG_BUILD_DIR)\" -maxdepth 6 -type f -name '*.c' -print -quit`\"; fi; \\",
-            "\t  test -n \"$$SRC\"; \\",
-            "\t  echo \"Building from $$SRC\"; \\",
+            "\t  echo '=== ensure source exists ==='; \\",
+            "\t  test -f \"$(PKG_BUILD_DIR)/chan_quectel.c\"; \\",
+            "\t  echo \"Building from $(PKG_BUILD_DIR)/chan_quectel.c\"; \\",
             "\t  echo '=== check openssl libs in staging ==='; \\",
             "\t  ls -la \"$(STAGING_DIR)/usr/lib\" | grep -E 'lib(ssl|crypto)\\.so' || true; \\",
             "\t  $(TARGET_CC) -shared -fPIC \\",
@@ -106,7 +104,7 @@ jobs:
             "\t    -I$(STAGING_DIR)/usr/include \\",
             "\t    -I$(STAGING_DIR)/usr/include/asterisk \\",
             "\t    -I$(STAGING_DIR)/usr/include/libusb-1.0 \\",
-            "\t    -o \"$(PKG_BUILD_DIR)/chan_quectel.so\" \"$$SRC\" \\",
+            "\t    -o \"$(PKG_BUILD_DIR)/chan_quectel.so\" \"$(PKG_BUILD_DIR)/chan_quectel.c\" \\",
             "\t    -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto;",
             "endef",
             "",
@@ -128,8 +126,8 @@ jobs:
           sed -i 's/\r$//' "$MF"
           perl -pi -e 's/^ +(?=\$\()/\t/' "$MF"
 
-          echo "=== Makefile (45..120) ==="
-          nl -ba "$MF" | sed -n '45,120p'
+          echo "=== Generated Makefile (1..120) ==="
+          nl -ba "$MF" | sed -n '1,120p'
 
       - name: Minimal .config (no menuconfig)
         working-directory: ${{ env.SDK_DIR }}
@@ -149,7 +147,7 @@ jobs:
           EOF
           make defconfig
 
-      - name: Build chan_quectel (IPK) - deps build automatically
+      - name: Build chan_quectel
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
