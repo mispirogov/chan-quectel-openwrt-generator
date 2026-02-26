@@ -50,40 +50,41 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Detect asterisk package directory in SDK
+      - name: Detect asterisk package directory in package/feeds (deep search)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
-          AST_DIR=""
-          AST_PKG=""
+          # Ищем именно Makefile пакета, а не каталог (так надёжнее).
+          # Сначала пытаемся asterisk20 (если вдруг есть), иначе обычный asterisk.
+          AST_MK20=$(find package/feeds -type f -path '*/asterisk20/Makefile' 2>/dev/null | head -n1 || true)
+          AST_MK=$(find package/feeds -type f -path '*/asterisk/Makefile' 2>/dev/null | head -n1 || true)
 
-          # Prefer asterisk20 if exists, else asterisk
-          AST20_DIR=$(find package/feeds -maxdepth 3 -type d -name "asterisk20" | head -n1 || true)
-          if [ -n "$AST20_DIR" ]; then
-            AST_DIR="$AST20_DIR"
-            AST_PKG="asterisk20"
-          else
-            AST_DIR=$(find package/feeds -maxdepth 3 -type d -name "asterisk" | head -n1 || true)
-            AST_PKG="asterisk"
+          if [ -n "$AST_MK20" ]; then
+            AST_MK="$AST_MK20"
           fi
 
-          if [ -z "$AST_DIR" ]; then
-            echo "ERROR: cannot find asterisk package directory under package/feeds"
-            find package/feeds -maxdepth 3 -type d -name "asterisk*" -print || true
+          if [ -z "$AST_MK" ]; then
+            echo "ERROR: cannot find */asterisk/Makefile (or asterisk20) under package/feeds"
+            find package/feeds -type f -path '*asterisk*/Makefile' | sed -n '1,120p' || true
             exit 1
           fi
 
+          AST_DIR=$(dirname "$AST_MK")
+          AST_PKG=$(basename "$AST_DIR")
+
+          echo "AST_MK=$AST_MK" >> "$GITHUB_ENV"
           echo "AST_DIR=$AST_DIR" >> "$GITHUB_ENV"
           echo "AST_PKG=$AST_PKG" >> "$GITHUB_ENV"
-          echo "Using AST_PKG=$AST_PKG"
+
+          echo "Using AST_MK=$AST_MK"
           echo "Using AST_DIR=$AST_DIR"
+          echo "Using AST_PKG=$AST_PKG"
 
       - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-
           rm -rf package/feeds/custom/chan_quectel
           mkdir -p package/feeds/custom/chan_quectel/src
 
@@ -103,7 +104,7 @@ jobs:
           MF=package/feeds/custom/chan_quectel/Makefile
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Makefile lines. Recipes start with 4 spaces, потом конвертнем в TAB.
+          # Важно: рецепты пишем с 4 пробелами в начале, потом конвертируем их в TAB.
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -120,7 +121,7 @@ jobs:
             '  CATEGORY:=Network' \
             '  SUBMENU:=Telephony' \
             '  TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            '  DEPENDS:=+$(AST_PKG) +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
+            "  DEPENDS:=+${AST_PKG} +libopenssl +libiconv-full +alsa-lib +libusb-1.0" \
             'endef' \
             '' \
             'define Package/chan_quectel/description' \
@@ -133,18 +134,16 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @set -eux; \' \
-            '    test -f "$(PKG_BUILD_DIR)/chan_quectel.c"; \' \
-            '    echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"; \' \
-            '    $(TARGET_CC) -shared -fPIC \' \
-            '      $(TARGET_CFLAGS) $(EXTRA_CFLAGS) \' \
-            '      -I$(STAGING_DIR)/usr/include \' \
-            '      -I$(STAGING_DIR)/usr/include/asterisk \' \
-            '      -I$(STAGING_DIR)/usr/include/libusb-1.0 \' \
-            '      -o "$(PKG_BUILD_DIR)/chan_quectel.so" \' \
-            '      "$(PKG_BUILD_DIR)/chan_quectel.c" \' \
-            '      -L$(STAGING_DIR)/usr/lib \' \
-            '      -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @set -eux;' \
+            '    test -f "$(PKG_BUILD_DIR)/chan_quectel.c"' \
+            '    echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"' \
+            '    $(TARGET_CC) -shared -fPIC' \
+            '      $(TARGET_CFLAGS) $(EXTRA_CFLAGS)' \
+            '      -I$(STAGING_DIR)/usr/include' \
+            '      -I$(STAGING_DIR)/usr/include/asterisk' \
+            '      -I$(STAGING_DIR)/usr/include/libusb-1.0' \
+            '      -o "$(PKG_BUILD_DIR)/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.c"' \
+            '      -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -155,12 +154,12 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # Convert the 4 leading spaces before $(...) to real TABs (required by make)
-          perl -pi -e 's/^ {4}(?=\$\()/\t/' "$MF"
+          # Конвертируем 4 пробела в TAB только для строк рецептов (где начинается команда)
+          perl -pi -e 's/^ {4}(?=\$|@)/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
           echo "=== Makefile preview ==="
-          nl -ba "$MF" | sed -n '1,140p'
+          nl -ba "$MF" | sed -n '1,160p'
 
       - name: Create minimal .config
         working-directory: ${{ env.SDK_DIR }}
@@ -188,18 +187,18 @@ jobs:
 
           make defconfig
 
-      - name: Build Asterisk first (to populate staging headers)
+      - name: Build Asterisk first (populate staging headers)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-          echo "Building asterisk package first: $AST_DIR"
-          make "$AST_DIR/compile" -j"$(nproc)" V=s
+          echo "Building Asterisk via: make ${AST_DIR}/compile"
+          make "${AST_DIR}/compile" -j"$(nproc)" V=s
 
-          echo "=== check for asterisk.h in staging ==="
-          find "staging_dir" -type f -name "asterisk.h" -maxdepth 6 -print || true
+          echo "=== search asterisk.h in staging_dir ==="
+          find staging_dir -type f -name 'asterisk.h' -print | sed -n '1,50p' || true
 
-          echo "=== list staging include/asterisk (if exists) ==="
-          ls -la "staging_dir/target-aarch64_cortex-a53_musl/usr/include/asterisk" || true
+          echo "=== list include/asterisk (if exists) ==="
+          ls -la staging_dir/target-aarch64_cortex-a53_musl/usr/include/asterisk || true
 
       - name: Build chan_quectel
         working-directory: ${{ env.SDK_DIR }}
@@ -211,12 +210,9 @@ jobs:
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-
           mkdir -p /tmp/artifacts
-
           find bin/packages -type f -name "chan_quectel_*.ipk" -exec cp -v {} /tmp/artifacts/ \; || true
           find build_dir -type f -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
-
           echo "=== artifacts ==="
           ls -la /tmp/artifacts
 
