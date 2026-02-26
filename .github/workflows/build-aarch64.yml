@@ -50,6 +50,35 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Detect asterisk package directory in SDK
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          AST_DIR=""
+          AST_PKG=""
+
+          # Prefer asterisk20 if exists, else asterisk
+          AST20_DIR=$(find package/feeds -maxdepth 3 -type d -name "asterisk20" | head -n1 || true)
+          if [ -n "$AST20_DIR" ]; then
+            AST_DIR="$AST20_DIR"
+            AST_PKG="asterisk20"
+          else
+            AST_DIR=$(find package/feeds -maxdepth 3 -type d -name "asterisk" | head -n1 || true)
+            AST_PKG="asterisk"
+          fi
+
+          if [ -z "$AST_DIR" ]; then
+            echo "ERROR: cannot find asterisk package directory under package/feeds"
+            find package/feeds -maxdepth 3 -type d -name "asterisk*" -print || true
+            exit 1
+          fi
+
+          echo "AST_DIR=$AST_DIR" >> "$GITHUB_ENV"
+          echo "AST_PKG=$AST_PKG" >> "$GITHUB_ENV"
+          echo "Using AST_PKG=$AST_PKG"
+          echo "Using AST_DIR=$AST_DIR"
+
       - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
         run: |
@@ -66,7 +95,7 @@ jobs:
             /tmp/chan/ \
             package/feeds/custom/chan_quectel/src/
 
-      - name: Write OpenWrt package Makefile
+      - name: Write OpenWrt package Makefile (no heredoc)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -74,6 +103,7 @@ jobs:
           MF=package/feeds/custom/chan_quectel/Makefile
           mkdir -p package/feeds/custom/chan_quectel
 
+          # Makefile lines. Recipes start with 4 spaces, потом конвертнем в TAB.
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -90,7 +120,7 @@ jobs:
             '  CATEGORY:=Network' \
             '  SUBMENU:=Telephony' \
             '  TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            '  DEPENDS:=+asterisk20 +asterisk20-dev +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
+            '  DEPENDS:=+$(AST_PKG) +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
             'endef' \
             '' \
             'define Package/chan_quectel/description' \
@@ -98,55 +128,78 @@ jobs:
             'endef' \
             '' \
             'define Build/Prepare' \
-            '	$(call Build/Prepare/Default)' \
-            '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
+            '    $(call Build/Prepare/Default)' \
+            '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@set -eux; \' \
-            '	test -f "$(PKG_BUILD_DIR)/chan_quectel.c"; \' \
-            '	echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"; \' \
-            '	$(TARGET_CC) -shared -fPIC \' \
-            '	  $(TARGET_CFLAGS) \' \
-            '	  -I$(STAGING_DIR)/usr/include \' \
-            '	  -I$(STAGING_DIR)/usr/include/asterisk \' \
-            '	  -I$(STAGING_DIR)/usr/include/libusb-1.0 \' \
-            '	  -o "$(PKG_BUILD_DIR)/chan_quectel.so" \' \
-            '	  "$(PKG_BUILD_DIR)/chan_quectel.c" \' \
-            '	  -L$(STAGING_DIR)/usr/lib \' \
-            '	  -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @set -eux; \' \
+            '    test -f "$(PKG_BUILD_DIR)/chan_quectel.c"; \' \
+            '    echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"; \' \
+            '    $(TARGET_CC) -shared -fPIC \' \
+            '      $(TARGET_CFLAGS) $(EXTRA_CFLAGS) \' \
+            '      -I$(STAGING_DIR)/usr/include \' \
+            '      -I$(STAGING_DIR)/usr/include/asterisk \' \
+            '      -I$(STAGING_DIR)/usr/include/libusb-1.0 \' \
+            '      -o "$(PKG_BUILD_DIR)/chan_quectel.so" \' \
+            '      "$(PKG_BUILD_DIR)/chan_quectel.c" \' \
+            '      -L$(STAGING_DIR)/usr/lib \' \
+            '      -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
-            '	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
-            '	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
+            '    $(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
+            '    $(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
             'endef' \
             '' \
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
+          # Convert the 4 leading spaces before $(...) to real TABs (required by make)
+          perl -pi -e 's/^ {4}(?=\$\()/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
+
+          echo "=== Makefile preview ==="
+          nl -ba "$MF" | sed -n '1,140p'
 
       - name: Create minimal .config
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
+          CFG=".config"
+          : > "$CFG"
+
           printf '%s\n' \
             'CONFIG_TARGET_mediatek=y' \
             'CONFIG_TARGET_mediatek_filogic=y' \
             'CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y' \
             '' \
-            'CONFIG_PACKAGE_asterisk20=y' \
-            'CONFIG_PACKAGE_asterisk20-dev=y' \
+            "CONFIG_PACKAGE_${AST_PKG}=y" \
             'CONFIG_PACKAGE_libopenssl=y' \
             'CONFIG_PACKAGE_libiconv-full=y' \
             'CONFIG_PACKAGE_alsa-lib=y' \
             'CONFIG_PACKAGE_libusb-1.0=y' \
             'CONFIG_PACKAGE_chan_quectel=y' \
-            > .config
+            >> "$CFG"
+
+          echo "=== .config ==="
+          cat "$CFG"
 
           make defconfig
+
+      - name: Build Asterisk first (to populate staging headers)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          echo "Building asterisk package first: $AST_DIR"
+          make "$AST_DIR/compile" -j"$(nproc)" V=s
+
+          echo "=== check for asterisk.h in staging ==="
+          find "staging_dir" -type f -name "asterisk.h" -maxdepth 6 -print || true
+
+          echo "=== list staging include/asterisk (if exists) ==="
+          ls -la "staging_dir/target-aarch64_cortex-a53_musl/usr/include/asterisk" || true
 
       - name: Build chan_quectel
         working-directory: ${{ env.SDK_DIR }}
@@ -164,6 +217,7 @@ jobs:
           find bin/packages -type f -name "chan_quectel_*.ipk" -exec cp -v {} /tmp/artifacts/ \; || true
           find build_dir -type f -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
 
+          echo "=== artifacts ==="
           ls -la /tmp/artifacts
 
       - name: Upload artifacts
