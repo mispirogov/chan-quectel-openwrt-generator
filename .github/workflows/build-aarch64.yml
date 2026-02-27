@@ -43,43 +43,48 @@ jobs:
           SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -n1)
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Update and install feeds
+      - name: Add telephony feed (if missing) + update/install feeds
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
+
+          # Добавляем telephony feed (в 24.10 правильная ветка обычно openwrt-24.10)
+          if ! grep -qE '^\s*src-git\s+telephony\s+' feeds.conf.default; then
+            echo "src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.10" >> feeds.conf.default
+          fi
+
+          echo "=== feeds.conf.default ==="
+          sed -n '1,200p' feeds.conf.default
+
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+          # На всякий случай принудительно ставим asterisk из telephony в package/feeds/...
+          ./scripts/feeds install -p telephony asterisk || ./scripts/feeds install asterisk || true
 
       - name: Detect asterisk package directory in package/feeds (deep search)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
-          # Ищем именно Makefile пакета, а не каталог (так надёжнее).
-          # Сначала пытаемся asterisk20 (если вдруг есть), иначе обычный asterisk.
-          AST_MK20=$(find package/feeds -type f -path '*/asterisk20/Makefile' 2>/dev/null | head -n1 || true)
           AST_MK=$(find package/feeds -type f -path '*/asterisk/Makefile' 2>/dev/null | head -n1 || true)
-
-          if [ -n "$AST_MK20" ]; then
-            AST_MK="$AST_MK20"
-          fi
-
           if [ -z "$AST_MK" ]; then
-            echo "ERROR: cannot find */asterisk/Makefile (or asterisk20) under package/feeds"
-            find package/feeds -type f -path '*asterisk*/Makefile' | sed -n '1,120p' || true
+            echo "ERROR: asterisk Makefile not found under package/feeds"
+            echo "=== show telephony feed contents (feeds/telephony) ==="
+            find feeds -maxdepth 4 -type f -path '*telephony*asterisk*Makefile' -print | sed -n '1,80p' || true
+            echo "=== show any asterisk Makefiles under package/feeds ==="
+            find package/feeds -type f -path '*asterisk*Makefile' -print | sed -n '1,80p' || true
             exit 1
           fi
 
           AST_DIR=$(dirname "$AST_MK")
-          AST_PKG=$(basename "$AST_DIR")
-
-          echo "AST_MK=$AST_MK" >> "$GITHUB_ENV"
           echo "AST_DIR=$AST_DIR" >> "$GITHUB_ENV"
-          echo "AST_PKG=$AST_PKG" >> "$GITHUB_ENV"
 
-          echo "Using AST_MK=$AST_MK"
           echo "Using AST_DIR=$AST_DIR"
-          echo "Using AST_PKG=$AST_PKG"
+          echo "=== asterisk Makefile header ==="
+          sed -n '1,80p' "$AST_MK" || true
+          echo "=== PKG_VERSION lines (if present) ==="
+          grep -nE '^(PKG_VERSION|PKG_RELEASE|PKG_SOURCE_VERSION|PKG_HASH|PKG_MIRROR_HASH|PKG_NAME)\s*:=' "$AST_MK" || true
 
       - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
@@ -104,7 +109,7 @@ jobs:
           MF=package/feeds/custom/chan_quectel/Makefile
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Важно: рецепты пишем с 4 пробелами в начале, потом конвертируем их в TAB.
+          # Рецепты пишем с 4 пробелами, потом конвертим их в TAB.
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -121,7 +126,7 @@ jobs:
             '  CATEGORY:=Network' \
             '  SUBMENU:=Telephony' \
             '  TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            "  DEPENDS:=+${AST_PKG} +libopenssl +libiconv-full +alsa-lib +libusb-1.0" \
+            '  DEPENDS:=+asterisk +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
             'endef' \
             '' \
             'define Package/chan_quectel/description' \
@@ -154,11 +159,11 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # Конвертируем 4 пробела в TAB только для строк рецептов (где начинается команда)
+          # TAB для make
           perl -pi -e 's/^ {4}(?=\$|@)/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
-          echo "=== Makefile preview ==="
+          echo "=== Generated Makefile preview ==="
           nl -ba "$MF" | sed -n '1,160p'
 
       - name: Create minimal .config
@@ -174,7 +179,7 @@ jobs:
             'CONFIG_TARGET_mediatek_filogic=y' \
             'CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y' \
             '' \
-            "CONFIG_PACKAGE_${AST_PKG}=y" \
+            'CONFIG_PACKAGE_asterisk=y' \
             'CONFIG_PACKAGE_libopenssl=y' \
             'CONFIG_PACKAGE_libiconv-full=y' \
             'CONFIG_PACKAGE_alsa-lib=y' \
@@ -191,11 +196,12 @@ jobs:
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
+
           echo "Building Asterisk via: make ${AST_DIR}/compile"
           make "${AST_DIR}/compile" -j"$(nproc)" V=s
 
-          echo "=== search asterisk.h in staging_dir ==="
-          find staging_dir -type f -name 'asterisk.h' -print | sed -n '1,50p' || true
+          echo "=== find asterisk.h in staging_dir ==="
+          find staging_dir -type f -name 'asterisk.h' -print | sed -n '1,80p' || true
 
           echo "=== list include/asterisk (if exists) ==="
           ls -la staging_dir/target-aarch64_cortex-a53_musl/usr/include/asterisk || true
