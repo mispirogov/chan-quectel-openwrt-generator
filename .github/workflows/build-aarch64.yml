@@ -48,7 +48,7 @@ jobs:
         run: |
           set -eux
 
-          # Добавляем telephony feed (ветка под 24.10)
+          # Добавляем telephony feed под 24.10 (если его нет)
           if ! grep -qE '^\s*src-git\s+telephony\s+' feeds.conf.default; then
             echo "src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.10" >> feeds.conf.default
           fi
@@ -59,7 +59,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # Проверка, что telephony реально скачался
+          # Гарантируем, что telephony/asterisk точно скачан
           test -f feeds/telephony/net/asterisk/Makefile
           echo "OK: feeds/telephony/net/asterisk/Makefile exists"
 
@@ -68,17 +68,31 @@ jobs:
         run: |
           set -eux
 
-          # В некоторых SDK scripts/feeds install не создаёт package/feeds/telephony/asterisk.
-          # Делаем это вручную, чтобы make видел пакет.
+          # Иногда scripts/feeds install не создаёт package/feeds/telephony/asterisk — делаем вручную
           mkdir -p package/feeds/telephony
+          mkdir -p package/feeds/telephony/net
 
-          # Линк: package/feeds/telephony/asterisk -> feeds/telephony/net/asterisk
-          # (три ".." от package/feeds/telephony до TOPDIR)
+          # Вариант 1: package/feeds/telephony/asterisk
           ln -sfn ../../../feeds/telephony/net/asterisk package/feeds/telephony/asterisk
 
-          echo "=== check linked Makefile ==="
-          test -f package/feeds/telephony/asterisk/Makefile
-          ls -la package/feeds/telephony/asterisk | sed -n '1,120p'
+          # Вариант 2: package/feeds/telephony/net/asterisk
+          ln -sfn ../../../../feeds/telephony/net/asterisk package/feeds/telephony/net/asterisk
+
+          # Выбираем реальный target для make
+          if [ -f package/feeds/telephony/asterisk/Makefile ]; then
+            echo "AST_TARGET=package/feeds/telephony/asterisk" >> "$GITHUB_ENV"
+          elif [ -f package/feeds/telephony/net/asterisk/Makefile ]; then
+            echo "AST_TARGET=package/feeds/telephony/net/asterisk" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: asterisk Makefile not found under package/feeds/telephony after linking"
+            ls -la package/feeds/telephony || true
+            ls -la package/feeds/telephony/net || true
+            exit 1
+          fi
+
+          echo "AST_TARGET=$AST_TARGET"
+          echo "=== linked asterisk Makefile (top) ==="
+          sed -n '1,40p' "$AST_TARGET/Makefile" || true
 
       - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
@@ -103,7 +117,8 @@ jobs:
           MF=package/feeds/custom/chan_quectel/Makefile
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Рецепты пишем с 4 пробелами, затем конвертируем в TAB
+          # ВАЖНО: рецепты пишем с 4 пробелами -> потом заменяем на TAB
+          # Добавили PKG_BUILD_DEPENDS:=asterisk чтобы headers точно попали в staging при сборке зависимостей
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -112,6 +127,7 @@ jobs:
             'PKG_RELEASE:=1' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)' \
+            'PKG_BUILD_DEPENDS:=asterisk' \
             '' \
             'include $(INCLUDE_DIR)/package.mk' \
             '' \
@@ -133,16 +149,7 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @set -eux;' \
-            '    test -f "$(PKG_BUILD_DIR)/chan_quectel.c"' \
-            '    echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"' \
-            '    $(TARGET_CC) -shared -fPIC' \
-            '      $(TARGET_CFLAGS) $(EXTRA_CFLAGS)' \
-            '      -I$(STAGING_DIR)/usr/include' \
-            '      -I$(STAGING_DIR)/usr/include/asterisk' \
-            '      -I$(STAGING_DIR)/usr/include/libusb-1.0' \
-            '      -o "$(PKG_BUILD_DIR)/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.c"' \
-            '      -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @set -eux; test -f "$(PKG_BUILD_DIR)/chan_quectel.c"; echo "Building $(PKG_BUILD_DIR)/chan_quectel.c"; ls -la "$(STAGING_DIR)/usr/include/asterisk" || true; $(TARGET_CC) -shared -fPIC $(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk -I$(STAGING_DIR)/usr/include/libusb-1.0 -o "$(PKG_BUILD_DIR)/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.c" -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -153,12 +160,12 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # TAB для make (строки с 4 пробелами в начале)
+          # TAB для make: заменяем первые 4 пробела на таб только в рецептах
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
           echo "=== Generated Makefile preview ==="
-          nl -ba "$MF" | sed -n '1,180p'
+          nl -ba "$MF" | sed -n '1,200p'
 
       - name: Create minimal .config
         working-directory: ${{ env.SDK_DIR }}
@@ -190,8 +197,8 @@ jobs:
         run: |
           set -eux
 
-          # Теперь путь гарантированно есть (мы создали линк)
-          make package/feeds/telephony/asterisk/compile -j"$(nproc)" V=s
+          echo "Building Asterisk via: make ${AST_TARGET}/compile"
+          make "${AST_TARGET}/compile" -j"$(nproc)" V=s
 
           echo "=== find asterisk.h in staging_dir ==="
           find staging_dir -type f -name 'asterisk.h' -print | sed -n '1,80p' || true
