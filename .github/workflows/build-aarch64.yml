@@ -43,12 +43,12 @@ jobs:
           SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -n1)
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Add telephony feed (if missing) + update/install feeds
+      - name: Add telephony feed + update/install feeds
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
-          # Добавляем telephony feed (в 24.10 правильная ветка обычно openwrt-24.10)
+          # Добавляем telephony feed (ветка под 24.10)
           if ! grep -qE '^\s*src-git\s+telephony\s+' feeds.conf.default; then
             echo "src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.10" >> feeds.conf.default
           fi
@@ -59,32 +59,26 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-          # На всякий случай принудительно ставим asterisk из telephony в package/feeds/...
-          ./scripts/feeds install -p telephony asterisk || ./scripts/feeds install asterisk || true
+          # Проверка, что telephony реально скачался
+          test -f feeds/telephony/net/asterisk/Makefile
+          echo "OK: feeds/telephony/net/asterisk/Makefile exists"
 
-      - name: Detect asterisk package directory in package/feeds (deep search)
+      - name: Force-link asterisk into package/feeds (workaround)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
-          AST_MK=$(find package/feeds -type f -path '*/asterisk/Makefile' 2>/dev/null | head -n1 || true)
-          if [ -z "$AST_MK" ]; then
-            echo "ERROR: asterisk Makefile not found under package/feeds"
-            echo "=== show telephony feed contents (feeds/telephony) ==="
-            find feeds -maxdepth 4 -type f -path '*telephony*asterisk*Makefile' -print | sed -n '1,80p' || true
-            echo "=== show any asterisk Makefiles under package/feeds ==="
-            find package/feeds -type f -path '*asterisk*Makefile' -print | sed -n '1,80p' || true
-            exit 1
-          fi
+          # В некоторых SDK scripts/feeds install не создаёт package/feeds/telephony/asterisk.
+          # Делаем это вручную, чтобы make видел пакет.
+          mkdir -p package/feeds/telephony
 
-          AST_DIR=$(dirname "$AST_MK")
-          echo "AST_DIR=$AST_DIR" >> "$GITHUB_ENV"
+          # Линк: package/feeds/telephony/asterisk -> feeds/telephony/net/asterisk
+          # (три ".." от package/feeds/telephony до TOPDIR)
+          ln -sfn ../../../feeds/telephony/net/asterisk package/feeds/telephony/asterisk
 
-          echo "Using AST_DIR=$AST_DIR"
-          echo "=== asterisk Makefile header ==="
-          sed -n '1,80p' "$AST_MK" || true
-          echo "=== PKG_VERSION lines (if present) ==="
-          grep -nE '^(PKG_VERSION|PKG_RELEASE|PKG_SOURCE_VERSION|PKG_HASH|PKG_MIRROR_HASH|PKG_NAME)\s*:=' "$AST_MK" || true
+          echo "=== check linked Makefile ==="
+          test -f package/feeds/telephony/asterisk/Makefile
+          ls -la package/feeds/telephony/asterisk | sed -n '1,120p'
 
       - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
@@ -109,7 +103,7 @@ jobs:
           MF=package/feeds/custom/chan_quectel/Makefile
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Рецепты пишем с 4 пробелами, потом конвертим их в TAB.
+          # Рецепты пишем с 4 пробелами, затем конвертируем в TAB
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -159,12 +153,12 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # TAB для make
-          perl -pi -e 's/^ {4}(?=\$|@)/\t/' "$MF"
+          # TAB для make (строки с 4 пробелами в начале)
+          perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
           echo "=== Generated Makefile preview ==="
-          nl -ba "$MF" | sed -n '1,160p'
+          nl -ba "$MF" | sed -n '1,180p'
 
       - name: Create minimal .config
         working-directory: ${{ env.SDK_DIR }}
@@ -189,7 +183,6 @@ jobs:
 
           echo "=== .config ==="
           cat "$CFG"
-
           make defconfig
 
       - name: Build Asterisk first (populate staging headers)
@@ -197,8 +190,8 @@ jobs:
         run: |
           set -eux
 
-          echo "Building Asterisk via: make ${AST_DIR}/compile"
-          make "${AST_DIR}/compile" -j"$(nproc)" V=s
+          # Теперь путь гарантированно есть (мы создали линк)
+          make package/feeds/telephony/asterisk/compile -j"$(nproc)" V=s
 
           echo "=== find asterisk.h in staging_dir ==="
           find staging_dir -type f -name 'asterisk.h' -print | sed -n '1,80p' || true
