@@ -54,8 +54,10 @@ jobs:
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
+
           AST_SRC="${PWD}/feeds/telephony/net/asterisk"
           test -f "${AST_SRC}/Makefile"
+
           ln -sfn "${AST_SRC}" package/asterisk
           test -f package/asterisk/Makefile
 
@@ -128,7 +130,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, MAX CONTROL v5)
+      - name: Write chan_quectel OpenWrt package Makefile (MAX CONTROL v6, no heredoc)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -147,6 +149,8 @@ jobs:
             '' \
             'include $(INCLUDE_DIR)/package.mk' \
             '' \
+            'STAGING_DIR_TARGET ?= $(STAGING_DIR)' \
+            '' \
             'define Package/chan_quectel' \
             '  SECTION:=net' \
             '  CATEGORY:=Network' \
@@ -159,15 +163,13 @@ jobs:
             '  Asterisk channel driver (chan_quectel) for Quectel LTE modems.' \
             'endef' \
             '' \
-            'EXTRA_CFLAGS +=' \
-            '' \
             'define Build/Prepare' \
             '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @echo "Compiling chan_quectel.c - MAX CONTROL v5"; $(TARGET_CC) -shared -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L -D_POSIX_TIMERS=1 -D_POSIX_MONOTONIC_CLOCK=1 -D__MUSL__ -D__linux__ -D__USE_MISC=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\" -include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/time.h -include sys/types.h -include pthread.h -include $(STAGING_DIR)/usr/include/asterisk/compiler.h -include $(STAGING_DIR)/usr/include/asterisk/autoconfig.h $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk -I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @echo "Compiling chan_quectel.c - MAX CONTROL v6"; $(TARGET_CC) -shared -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L -D_POSIX_TIMERS=1 -D_POSIX_MONOTONIC_CLOCK=1 -D__MUSL__ -D__linux__ -D__USE_MISC=1 -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_TIME_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_PTHREAD_H=1 -DHAVE_ENDIAN_H=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\" -include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/time.h -include sys/types.h -include pthread.h -include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h -include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 -o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c -L$(STAGING_DIR_TARGET)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
