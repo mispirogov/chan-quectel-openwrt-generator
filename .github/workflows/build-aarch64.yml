@@ -121,7 +121,7 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, fixed EXTRA_CFLAGS order)
+      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, correct include order, safe 1-line compile)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -129,9 +129,11 @@ jobs:
           MF="package/feeds/custom/chan_quectel/Makefile"
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Все флаги одной строкой (чтобы ничего не "съедалось" make'ом и не ломалось переносами)
-          # Порядок: disable fortify -> feature macros -> system includes -> asterisk autoconfig/compiler -> module defs
-          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D__MUSL__ -include sys/types.h -include sys/socket.h -include netinet/in.h -include arpa/inet.h -include stdio.h -include string.h -include time.h -include $(STAGING_DIR)/usr/include/asterisk/autoconfig.h -include $(STAGING_DIR)/usr/include/asterisk/compiler.h -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
+          # ВАЖНО:
+          # 1) autoconfig.h + compiler.h идут ПЕРВЫМИ (как ты требуешь)
+          # 2) отключаем FORTIFY в самом начале
+          # 3) Build/Compile — ОДНА строка, чтобы make не "съел" -I/-L/-o
+          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h -include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h -include stdint.h -include sys/types.h -include sys/socket.h -include netinet/in.h -include arpa/inet.h -include stdio.h -include string.h -include time.h -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
 
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
@@ -165,7 +167,7 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @set -eux; test -f "$(PKG_BUILD_DIR)/chan_quectel.c"; echo "Compiling chan_quectel.c"; $(TARGET_CC) -shared -fPIC $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk -I$(STAGING_DIR)/usr/include/libusb-1.0 -o "$(PKG_BUILD_DIR)/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.c" -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @echo "Compiling chan_quectel.c"; $(TARGET_CC) -shared -fPIC $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 -o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c -L$(STAGING_DIR_TARGET)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
