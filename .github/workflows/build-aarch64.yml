@@ -84,9 +84,6 @@ jobs:
           echo "ASTERISK_VER=$AST_VER" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
 
-          echo "Asterisk PKG_VERSION=$AST_VER"
-          echo "Computed ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
-
       - name: Minimal .config (build asterisk first)
         working-directory: ${{ env.SDK_DIR }}
         run: |
@@ -132,7 +129,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, early std includes)
+      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, force compiler.h first via STAGING_DIR)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -140,9 +137,10 @@ jobs:
           MF="package/feeds/custom/chan_quectel/Makefile"
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Самое раннее: -include stdint/stdio/time/... чтобы uint*_t, FILE, va_list, CLOCK_REALTIME были до asterisk.h
-          # Asterisk -include НЕ используем (чтобы не улетать в /usr/include runner'а)
-          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/types.h -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
+          # Ключ:
+          # -include $(STAGING_DIR)/... чтобы НЕ превращалось в /usr/include на runner'е
+          # compiler.h + autoconfig.h идут ПЕРВЫМИ -> force_inline определён до network.h
+          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -include $(STAGING_DIR)/usr/include/asterisk/compiler.h -include $(STAGING_DIR)/usr/include/asterisk/autoconfig.h -include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/types.h -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
 
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
@@ -176,7 +174,7 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @echo "Compiling chan_quectel.c"; $(TARGET_CC) -shared -fPIC $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) $(EXTRA_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk -I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
+            '    @echo "Compiling chan_quectel.c"; $(TARGET_CC) -shared -fPIC $(EXTRA_CFLAGS) $(TARGET_CPPFLAGS) $(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/asterisk -I$(STAGING_DIR)/usr/include/libusb-1.0 -o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c -L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -189,9 +187,6 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-
-          echo "=== Generated chan_quectel Makefile preview ==="
-          nl -ba "$MF" | sed -n '1,220p'
 
       - name: Enable chan_quectel in .config and defconfig
         working-directory: ${{ env.SDK_DIR }}
