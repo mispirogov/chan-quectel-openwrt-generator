@@ -83,12 +83,11 @@ jobs:
 
           echo "ASTERISK_VER=$AST_VER" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
-          echo "CHAN_MODULE_NAME=chan_quectel" >> "$GITHUB_ENV"
 
           echo "Asterisk PKG_VERSION=$AST_VER"
           echo "Computed ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
 
-      - name: Create minimal .config (only for building asterisk first)
+      - name: Minimal .config (build asterisk first)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -113,41 +112,7 @@ jobs:
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Detect Asterisk autoconf header in staging (no heredoc)
-        working-directory: ${{ env.SDK_DIR }}
-        run: |
-          set -eux
-
-          TARGET_STAGING="$(find staging_dir -maxdepth 1 -type d -name 'target-*' | head -n1)"
-          if [ -z "$TARGET_STAGING" ]; then
-            echo "ERROR: cannot find staging_dir/target-*"
-            ls -la staging_dir || true
-            exit 1
-          fi
-
-          INC_AST="${TARGET_STAGING}/usr/include/asterisk"
-          echo "INC_AST=$INC_AST"
-          ls -la "$INC_AST" | sed -n '1,60p' || true
-
-          AST_CFG_HDR=""
-          if [ -f "${INC_AST}/autoconfig.h" ]; then
-            AST_CFG_HDR="asterisk/autoconfig.h"
-          elif [ -f "${INC_AST}/config.h" ]; then
-            AST_CFG_HDR="asterisk/config.h"
-          fi
-
-          if [ -z "$AST_CFG_HDR" ]; then
-            echo "ERROR: neither autoconfig.h nor config.h found in $INC_AST"
-            exit 1
-          fi
-
-          echo "AST_CFG_HDR=$AST_CFG_HDR" >> "$GITHUB_ENV"
-          echo "Using AST_CFG_HDR=$AST_CFG_HDR"
-
-          echo "=== sanity: HAVE_ARPA_INET_H occurrence ==="
-          grep -Rsn "HAVE_ARPA_INET_H" "$INC_AST" 2>/dev/null | sed -n '1,20p' || true
-
-      - name: Add chan_quectel source (generator repo)
+      - name: Add chan_quectel source
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -156,13 +121,17 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, fixed flags, autoconfig)
+      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, fixed EXTRA_CFLAGS order)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
 
           MF="package/feeds/custom/chan_quectel/Makefile"
           mkdir -p package/feeds/custom/chan_quectel
+
+          # Все флаги одной строкой (чтобы ничего не "съедалось" make'ом и не ломалось переносами)
+          # Порядок: disable fortify -> feature macros -> system includes -> asterisk autoconfig/compiler -> module defs
+          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D__MUSL__ -include sys/types.h -include sys/socket.h -include netinet/in.h -include arpa/inet.h -include stdio.h -include string.h -include time.h -include $(STAGING_DIR)/usr/include/asterisk/autoconfig.h -include $(STAGING_DIR)/usr/include/asterisk/compiler.h -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
 
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
@@ -188,12 +157,7 @@ jobs:
             '  Asterisk channel driver (chan_quectel) for Quectel LTE modems.' \
             'endef' \
             '' \
-            "EXTRA_CFLAGS += -include ${AST_CFG_HDR}" \
-            'EXTRA_CFLAGS += -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L' \
-            'EXTRA_CFLAGS += -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self' \
-            "EXTRA_CFLAGS += -DAST_MODULE=\\\"${CHAN_MODULE_NAME}\\\"" \
-            "EXTRA_CFLAGS += -DASTERISK_VERSION_NUM=${ASTERISK_VERSION_NUM}" \
-            'EXTRA_CFLAGS += -include stdint.h -include stdarg.h -include stdio.h -include time.h -include sys/types.h -include pthread.h' \
+            "EXTRA_CFLAGS += ${EXTRA_FLAGS}" \
             '' \
             'define Build/Prepare' \
             '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
@@ -212,7 +176,6 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # Make требует TAB в рецептах: меняем 4 пробела -> TAB
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
@@ -223,9 +186,7 @@ jobs:
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-          printf '%s\n' \
-            'CONFIG_PACKAGE_chan_quectel=y' \
-            >> .config
+          printf '%s\n' 'CONFIG_PACKAGE_chan_quectel=y' >> .config
           make defconfig
 
       - name: Build chan_quectel
