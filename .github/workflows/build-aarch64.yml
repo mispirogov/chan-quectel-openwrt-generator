@@ -64,7 +64,7 @@ jobs:
           AST_VER="$(sed -nE 's/^PKG_VERSION:=//p' package/asterisk/Makefile | head -n1 || true)"
           AST_VER="${AST_VER%%[^0-9.]*}"
           if [ -z "$AST_VER" ]; then
-            AST_VER="20.0.0"
+            AST_VER="20.8.1"
           fi
 
           OLDIFS="$IFS"
@@ -121,7 +121,7 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, correct include order, safe 1-line compile)
+      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, force HAVE_* first)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -129,11 +129,7 @@ jobs:
           MF="package/feeds/custom/chan_quectel/Makefile"
           mkdir -p package/feeds/custom/chan_quectel
 
-          # ВАЖНО:
-          # 1) autoconfig.h + compiler.h идут ПЕРВЫМИ (как ты требуешь)
-          # 2) отключаем FORTIFY в самом начале
-          # 3) Build/Compile — ОДНА строка, чтобы make не "съел" -I/-L/-o
-          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h -include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h -include stdint.h -include sys/types.h -include sys/socket.h -include netinet/in.h -include arpa/inet.h -include stdio.h -include string.h -include time.h -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
+          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -D__linux__ -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_TIME_H=1 -DHAVE_PTHREAD_H=1 -DHAVE_ENDIAN_H=1 -include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h -include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h -include stdint.h -include sys/types.h -include sys/socket.h -include netinet/in.h -include arpa/inet.h -include stdio.h -include time.h -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
 
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
