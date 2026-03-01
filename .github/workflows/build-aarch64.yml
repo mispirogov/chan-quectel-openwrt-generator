@@ -132,7 +132,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, no -include asterisk/*)
+      - name: Write chan_quectel OpenWrt package Makefile (no heredoc, early std includes)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -140,9 +140,9 @@ jobs:
           MF="package/feeds/custom/chan_quectel/Makefile"
           mkdir -p package/feeds/custom/chan_quectel
 
-          # Никаких -include asterisk/* (чтобы не пыталось лезть в /usr/include на runner)
-          # HAVE_* задаём жестко в самом начале — network.h перестанет падать в #error
-          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -D__linux__ -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_TIME_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_PTHREAD_H=1 -DHAVE_ENDIAN_H=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
+          # Самое раннее: -include stdint/stdio/time/... чтобы uint*_t, FILE, va_list, CLOCK_REALTIME были до asterisk.h
+          # Asterisk -include НЕ используем (чтобы не улетать в /usr/include runner'а)
+          EXTRA_FLAGS='-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D__MUSL__ -include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/types.h -DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\"'
 
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
