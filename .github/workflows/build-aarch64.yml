@@ -130,7 +130,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (MAX CONTROL v14 — -imacros + pthread patch)
+      - name: Write chan_quectel OpenWrt package Makefile (MAX CONTROL v15 — uint* types fixed)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -168,12 +168,13 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "Compiling chan_quectel.c - MAX CONTROL v14 final — -imacros + pthread patch"' \
+            '	@echo "Compiling chan_quectel.c - MAX CONTROL v15 final — uint* types fixed"' \
             '	$(TARGET_CC) -shared -fPIC \' \
-            '		-imacros $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
-            '		-imacros $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
             '		-D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L -D_POSIX_SOURCE -D_POSIX_TIMERS=1 -D_POSIX_MONOTONIC_CLOCK=1 -D__MUSL__ -D__linux__ -D__USE_MISC=1 -D__USE_GNU \' \
             '		-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \' \
+            '		-include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/time.h -include sys/types.h -include pthread.h \' \
+            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
+            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
             '		-DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_TIME_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_PTHREAD_H=1 -DHAVE_ENDIAN_H=1 \' \
             '		-DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\" \' \
             '		-I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 \' \
@@ -193,7 +194,7 @@ jobs:
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
           echo "=== Generated Makefile ==="
-          nl -ba "$MF" | sed -n '1,100p'
+          nl -ba "$MF" | sed -n '1,110p'
 
       - name: Enable chan_quectel in .config and defconfig
         working-directory: ${{ env.SDK_DIR }}
