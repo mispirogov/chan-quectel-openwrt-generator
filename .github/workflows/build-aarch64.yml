@@ -130,12 +130,16 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (MAX CONTROL v17 — ALL MACROS FIRST)
+      - name: Write chan_quectel OpenWrt package Makefile (v18 — preinclude.h)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           MF="package/feeds/custom/chan_quectel/Makefile"
+          PRE="package/feeds/custom/chan_quectel/preinclude.h"
           mkdir -p package/feeds/custom/chan_quectel
+
+          printf '#ifndef CHAN_QUECTEL_PREINCLUDE_H\n#define CHAN_QUECTEL_PREINCLUDE_H\n\n/* feature-test macros first */\n#ifndef _GNU_SOURCE\n#define _GNU_SOURCE\n#endif\n#ifndef _DEFAULT_SOURCE\n#define _DEFAULT_SOURCE\n#endif\n#ifndef _BSD_SOURCE\n#define _BSD_SOURCE\n#endif\n#ifndef _XOPEN_SOURCE\n#define _XOPEN_SOURCE 700\n#endif\n#ifndef _POSIX_C_SOURCE\n#define _POSIX_C_SOURCE 200809L\n#endif\n#ifndef _POSIX_SOURCE\n#define _POSIX_SOURCE\n#endif\n#ifndef _POSIX_TIMERS\n#define _POSIX_TIMERS 1\n#endif\n#ifndef _POSIX_MONOTONIC_CLOCK\n#define _POSIX_MONOTONIC_CLOCK 1\n#endif\n#ifndef __MUSL__\n#define __MUSL__\n#endif\n#ifndef __linux__\n#define __linux__\n#endif\n#ifndef __USE_MISC\n#define __USE_MISC 1\n#endif\n#ifndef __USE_GNU\n#define __USE_GNU\n#endif\n\n#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n\n/* base types first */\n#include <stdint.h>\n#include <stddef.h>\n#include <stdarg.h>\n\n/* asterisk macro headers early */\n#include <asterisk/compiler.h>\n#include <asterisk/autoconfig.h>\n\n/* system headers after feature macros */\n#include <stdio.h>\n#include <time.h>\n#include <sys/time.h>\n#include <sys/types.h>\n#include <pthread.h>\n\n#define HAVE_ARPA_INET_H 1\n#define HAVE_NETINET_IN_H 1\n#define HAVE_SYS_SOCKET_H 1\n#define HAVE_STDINT_H 1\n#define HAVE_INTTYPES_H 1\n#define HAVE_TIME_H 1\n#define HAVE_SYS_TYPES_H 1\n#define HAVE_PTHREAD_H 1\n#define HAVE_ENDIAN_H 1\n\n#endif\n' > "$PRE"
+
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -165,17 +169,12 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
+            '	$(CP) ./preinclude.h $(PKG_BUILD_DIR)/preinclude.h' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "Compiling chan_quectel.c - MAX CONTROL v17 final — ALL MACROS FIRST"' \
-            '	$(TARGET_CC) -shared -fPIC \' \
-            '		-D_GNU_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L -D_POSIX_SOURCE -D_POSIX_TIMERS=1 -D_POSIX_MONOTONIC_CLOCK=1 -D__MUSL__ -D__linux__ -D__USE_MISC=1 -D__USE_GNU \' \
-            '		-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
-            '		-include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/time.h -include sys/types.h -include pthread.h \' \
-            '		-DHAVE_ARPA_INET_H=1 -DHAVE_NETINET_IN_H=1 -DHAVE_SYS_SOCKET_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_TIME_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_PTHREAD_H=1 -DHAVE_ENDIAN_H=1 \' \
+            '	@echo "Compiling chan_quectel.c - v18 preinclude.h"' \
+            '	$(TARGET_CC) -shared -fPIC -include $(PKG_BUILD_DIR)/preinclude.h \' \
             '		-DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\" \' \
             '		-I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 \' \
             '		-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=chan_quectel=chan_quectel -Wformat -Werror=format-security -fstack-protector -Wl,-z,now -Wl,-z,relro \' \
@@ -191,11 +190,13 @@ jobs:
             '' \
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
+
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
           echo "=== Generated Makefile ==="
-          nl -ba "$MF" | sed -n '1,110p'
-          # heredoc запрещён — поэтому всё через printf.
+          nl -ba "$MF" | sed -n '1,90p'
+          echo "=== preinclude.h ==="
+          cat "$PRE"
 
       - name: Enable chan_quectel in .config and defconfig
         working-directory: ${{ env.SDK_DIR }}
