@@ -130,15 +130,14 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (v20 — full path + -include FIRST)
+      - name: Write chan_quectel OpenWrt package Makefile (v20 — -I FIRST)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           MF="package/feeds/custom/chan_quectel/Makefile"
           PRE="package/feeds/custom/chan_quectel/preinclude.h"
-          AST_INC="$(realpath staging_dir/target-aarch64_cortex-a53_musl/usr/include/asterisk)"
           mkdir -p package/feeds/custom/chan_quectel
-          printf '#ifndef CHAN_QUECTEL_PREINCLUDE_H\n#define CHAN_QUECTEL_PREINCLUDE_H\n\n#define _GNU_SOURCE\n#define _DEFAULT_SOURCE\n#define _BSD_SOURCE\n#define _XOPEN_SOURCE 700\n#define _POSIX_C_SOURCE 200809L\n#define _POSIX_SOURCE\n#define _POSIX_TIMERS 1\n#define _POSIX_MONOTONIC_CLOCK 1\n#define __MUSL__\n#define __linux__\n#define __USE_MISC 1\n#define __USE_GNU\n\n#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n\n#define HAVE_ARPA_INET_H 1\n#define HAVE_NETINET_IN_H 1\n#define HAVE_SYS_SOCKET_H 1\n#define HAVE_STDINT_H 1\n#define HAVE_INTTYPES_H 1\n#define HAVE_TIME_H 1\n#define HAVE_SYS_TYPES_H 1\n#define HAVE_PTHREAD_H 1\n#define HAVE_ENDIAN_H 1\n\n#include <stdint.h>\n#include <stddef.h>\n#include <stdarg.h>\n#include <stdio.h>\n#include <time.h>\n#include <sys/time.h>\n#include <sys/types.h>\n#include <pthread.h>\n\n#include "%s/compiler.h"\n#include "%s/autoconfig.h"\n\n#endif\n' "$AST_INC" "$AST_INC" > "$PRE"
+          printf '#ifndef CHAN_QUECTEL_PREINCLUDE_H\n#define CHAN_QUECTEL_PREINCLUDE_H\n\n#define _GNU_SOURCE\n#define _DEFAULT_SOURCE\n#define _BSD_SOURCE\n#define _XOPEN_SOURCE 700\n#define _POSIX_C_SOURCE 200809L\n#define _POSIX_SOURCE\n#define _POSIX_TIMERS 1\n#define _POSIX_MONOTONIC_CLOCK 1\n#define __MUSL__\n#define __linux__\n#define __USE_MISC 1\n#define __USE_GNU\n\n#undef _FORTIFY_SOURCE\n#define _FORTIFY_SOURCE 0\n\n#define HAVE_ARPA_INET_H 1\n#define HAVE_NETINET_IN_H 1\n#define HAVE_SYS_SOCKET_H 1\n#define HAVE_STDINT_H 1\n#define HAVE_INTTYPES_H 1\n#define HAVE_TIME_H 1\n#define HAVE_SYS_TYPES_H 1\n#define HAVE_PTHREAD_H 1\n#define HAVE_ENDIAN_H 1\n\n#include <stdint.h>\n#include <stddef.h>\n#include <stdarg.h>\n#include <stdio.h>\n#include <time.h>\n#include <sys/time.h>\n#include <sys/types.h>\n#include <pthread.h>\n\n#include <asterisk/compiler.h>\n#include <asterisk/autoconfig.h>\n\n#endif\n' > "$PRE"
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
@@ -172,10 +171,10 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "Compiling chan_quectel.c - v20 preinclude.h FINAL"' \
+            '	@echo "Compiling chan_quectel.c - v20 preinclude.h"' \
             '	$(TARGET_CC) -shared -fPIC \' \
-            '		-include $(PKG_BUILD_DIR)/preinclude.h \' \
             '		-I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 \' \
+            '		-include $(PKG_BUILD_DIR)/preinclude.h \' \
             '		-DASTERISK_VERSION_NUM='"${ASTERISK_VERSION_NUM}"' -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\"chan_quectel\" \' \
             '		-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=chan_quectel=chan_quectel -Wformat -Werror=format-security -fstack-protector -Wl,-z,now -Wl,-z,relro \' \
             '		-o $(PKG_BUILD_DIR)/chan_quectel.so \' \
