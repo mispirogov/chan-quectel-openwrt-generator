@@ -132,7 +132,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (v27b — system headers fullpath)
+      - name: Write chan_quectel OpenWrt package Makefile (v28 — system headers plain)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -175,18 +175,10 @@ jobs:
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "Compiling chan_quectel.c - v27b system headers fullpath"' \
+            '	@echo "Compiling chan_quectel.c - v28 system headers plain"' \
             '	$(TARGET_CC) -shared -fPIC \' \
             '		-include $(PKG_BUILD_DIR)/preinclude.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/stdint.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/stddef.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/stdarg.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/stdio.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/time.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/sys/time.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/sys/types.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/pthread.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/strings.h \' \
+            '		-include stdint.h -include stddef.h -include stdarg.h -include stdio.h -include time.h -include sys/time.h -include sys/types.h -include pthread.h -include strings.h \' \
             '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
             '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
             '		-I$(STAGING_DIR_TARGET)/usr/include -I$(STAGING_DIR_TARGET)/usr/include/asterisk -I$(STAGING_DIR_TARGET)/usr/include/libusb-1.0 \' \
@@ -205,7 +197,6 @@ jobs:
             '$(eval $(call BuildPackage,chan_quectel))' \
             > "$MF"
 
-          # На случай, если где-то в Makefile были 4 пробела вместо TAB (обычно уже не нужно)
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
           echo "=== Generated Makefile ==="
