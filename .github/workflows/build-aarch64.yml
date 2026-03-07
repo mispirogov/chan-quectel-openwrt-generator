@@ -130,7 +130,7 @@ jobs:
               "$f"
           done
 
-      - name: Write chan_quectel OpenWrt package Makefile (v30d — compiler.h first + TOOLCHAIN_DIR fallback)
+      - name: Write chan_quectel OpenWrt package Makefile (v32b — isystem early + types before asterisk)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -177,16 +177,21 @@ jobs:
             'define Build/Compile' \
             '	@echo "TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
             '	@echo "TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@test -f $(TOOLCHAIN_INC)/stdint.h' \
-            '	@echo "Compiling chan_quectel.c - v30d compiler.h first + TOOLCHAIN_DIR fallback"' \
+            '	@test -f $(TOOLCHAIN_INC)/stdint.h || { echo "ERROR: stdint.h not found"; exit 1; }' \
+            '	@test -f $(TOOLCHAIN_INC)/stdio.h  || { echo "ERROR: stdio.h not found"; exit 1; }' \
+            '	@test -f $(TOOLCHAIN_INC)/pthread.h || { echo "ERROR: pthread.h not found"; exit 1; }' \
+            '	@test -f $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h || { echo "ERROR: asterisk/compiler.h not found"; exit 1; }' \
+            '	@test -f $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h || { echo "ERROR: asterisk/autoconfig.h not found"; exit 1; }' \
+            '	@echo "Compiling chan_quectel.c - v32b"' \
             '	$(TARGET_CC) -shared -fPIC \' \
             '		-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \' \
             '		-include $(PKG_BUILD_DIR)/preinclude.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
-            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
+            '		-isystem $(TOOLCHAIN_INC) \' \
             '		-include $(TOOLCHAIN_INC)/stdint.h \' \
             '		-include $(TOOLCHAIN_INC)/stddef.h \' \
             '		-include $(TOOLCHAIN_INC)/stdarg.h \' \
+            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/compiler.h \' \
+            '		-include $(STAGING_DIR_TARGET)/usr/include/asterisk/autoconfig.h \' \
             '		-include $(TOOLCHAIN_INC)/stdio.h \' \
             '		-include $(TOOLCHAIN_INC)/time.h \' \
             '		-include $(TOOLCHAIN_INC)/sys/time.h \' \
@@ -212,7 +217,7 @@ jobs:
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
           echo "=== Generated Makefile ==="
-          nl -ba "$MF" | sed -n '1,160p'
+          nl -ba "$MF" | sed -n '1,180p'
           echo "=== preinclude.h ==="
           cat "$PRE"
 
