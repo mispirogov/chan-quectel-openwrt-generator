@@ -28,9 +28,12 @@ jobs:
             unzip \
             xz-utils \
             zstd \
-            perl
+            perl \
+            autoconf \
+            automake \
+            libtool
 
-      - name: Download OpenWrt SDK 24.10.4 (mediatek filogic)
+      - name: Download OpenWrt SDK 24.10.4 mediatek filogic
         run: |
           set -eux
           mkdir -p /tmp/sdk
@@ -40,7 +43,7 @@ jobs:
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Add telephony feed + update/install feeds
+      - name: Add telephony feed update install
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -51,7 +54,7 @@ jobs:
           ./scripts/feeds install -a
           test -f feeds/telephony/net/asterisk/Makefile
 
-      - name: Link asterisk + compute ASTERISK_VERSION_NUM (no heredoc)
+      - name: Link asterisk and compute ASTERISK_VERSION_NUM
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -76,7 +79,7 @@ jobs:
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
 
-      - name: Minimal .config (build asterisk first)
+      - name: Minimal config build asterisk first
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -92,13 +95,13 @@ jobs:
             'CONFIG_PACKAGE_libusb-1.0=y' > .config
           make defconfig
 
-      - name: Build Asterisk first (populate staging)
+      - name: Build asterisk populate staging
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude.h (v45a)
+      - name: Add chan_quectel source and preinclude v45b
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -109,6 +112,7 @@ jobs:
 
           PRE="package/feeds/custom/chan_quectel/src/preinclude.h"
           printf '%s\n' \
+            '/* v45b feature macros and libc warmup */' \
             '#ifndef QUECTEL_PREINCLUDE_H' \
             '#define QUECTEL_PREINCLUDE_H' \
             '' \
@@ -136,10 +140,10 @@ jobs:
             '' \
             '#endif' > "$PRE"
 
-          echo "=== preinclude.h v45a ==="
+          echo "=== preinclude.h v45b ==="
           cat "$PRE"
 
-      - name: Write chan_quectel Makefile (v45a — fixes from log)
+      - name: Write chan_quectel package Makefile v45b
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -150,65 +154,79 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v45a' \
+            'PKG_RELEASE:=v45b' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
             '' \
             'include $(INCLUDE_DIR)/package.mk' \
             '' \
-            '# Robust paths: do NOT rely on STAGING_DIR_TARGET in custom packages' \
+            '# Resolve paths from SDK staging_dir only (avoid STAGING_DIR_TARGET early-eval issues)' \
             'AST_INC := $(shell find $(TOPDIR)/staging_dir -path "*/usr/include/asterisk" -type d 2>/dev/null | head -n1)' \
             'TARGET_INC := $(patsubst %/asterisk,%,$(AST_INC))' \
-            '# CRITICAL: maxdepth=3 prevents picking .../lib/gcc/.../include' \
+            '# Critical: maxdepth=3 prevents selecting lib/gcc/.../include' \
             'TOOLCHAIN_INC := $(shell find $(TOPDIR)/staging_dir -maxdepth 3 -type d -path "*/toolchain-*/include" 2>/dev/null | head -n1)' \
             '' \
+            '# Drop toolchain fortify define and force FORTIFY=0 at the end' \
+            'TARGET_CFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CFLAGS))' \
+            'TARGET_CPPFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CPPFLAGS))' \
+            '' \
             'define Package/chan_quectel' \
-            '    SECTION:=net' \
-            '    CATEGORY:=Network' \
-            '    SUBMENU:=Telephony' \
-            '    TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            '    DEPENDS:=+asterisk +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
+            '	SECTION:=net' \
+            '	CATEGORY:=Network' \
+            '	SUBMENU:=Telephony' \
+            '	TITLE:=Asterisk channel driver for Quectel LTE modems' \
+            '	DEPENDS:=+asterisk +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
             'endef' \
             '' \
             'define Package/chan_quectel/description' \
-            '    Asterisk channel driver (chan_quectel) for Quectel LTE modems.' \
+            '	Asterisk channel driver (chan_quectel) for Quectel LTE modems.' \
             'endef' \
             '' \
             'define Build/Prepare' \
-            '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
-            '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '    @echo "[v45a] === PATH DIAGNOSTICS ==="' \
-            '    @echo "[v45a] AST_INC=$(AST_INC)"' \
-            '    @echo "[v45a] TARGET_INC=$(TARGET_INC)"' \
-            '    @echo "[v45a] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '    @test -n "$(AST_INC)" || { echo "[v45a] ERROR: AST_INC empty"; exit 1; }' \
-            '    @test -n "$(TOOLCHAIN_INC)" || { echo "[v45a] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
-            '    @test -f "$(AST_INC)/compat.h" || { echo "[v45a] ERROR: compat.h not found"; exit 1; }' \
-            '    @test -f "$(AST_INC)/astmm.h" || { echo "[v45a] ERROR: astmm.h not found"; exit 1; }' \
-            '    @test -f "$(AST_INC)/compiler.h" || { echo "[v45a] ERROR: compiler.h not found"; exit 1; }' \
-            '    @test -f "$(AST_INC)/autoconfig.h" || { echo "[v45a] ERROR: autoconfig.h not found"; exit 1; }' \
-            '    @test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "[v45a] ERROR: toolchain stdint.h not found"; exit 1; }' \
-            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v45a] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v45a] compat.h patched")' \
-            '    @grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v45a] astmm.h already patched" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v45a] astmm.h patched")' \
+            '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
+            '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
+            '	@echo "[v45b] AST_INC=$(AST_INC)"' \
+            '	@echo "[v45b] TARGET_INC=$(TARGET_INC)"' \
+            '	@echo "[v45b] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
+            '	@test -n "$(AST_INC)" || { echo "[v45b] ERROR: AST_INC empty"; exit 1; }' \
+            '	@test -n "$(TOOLCHAIN_INC)" || { echo "[v45b] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
+            '	@test -f "$(AST_INC)/compat.h" || { echo "[v45b] ERROR: compat.h missing"; exit 1; }' \
+            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v45b] ERROR: astmm.h missing"; exit 1; }' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v45b] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v45b] compat.h patched")' \
+            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v45b] astmm.h already patched" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v45b] astmm.h patched")' \
+            'endef' \
+            '' \
+            'define Build/Configure' \
+            '	@echo "[v45b] Running autotools prepare"' \
+            '	@(cd $(PKG_BUILD_DIR); if [ -x ./bootstrap ]; then ./bootstrap || true; fi)' \
+            '	@(cd $(PKG_BUILD_DIR); if [ ! -x ./configure ]; then autoreconf -fi; fi)' \
+            '	@(cd $(PKG_BUILD_DIR); if [ -f ./configure ] && [ ! -x ./configure ]; then chmod +x ./configure; fi)' \
+            '	@echo "[v45b] Running ./configure (log: configure.log)"' \
+            '	@(cd $(PKG_BUILD_DIR) && \\' \
+            '		$(TARGET_CONFIGURE_OPTS) \\' \
+            '		CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" \\' \
+            '		CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" \\' \
+            '		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib" \\' \
+            '		./configure --host=$(GNU_TARGET_NAME) --build=$(GNU_HOST_NAME) --prefix=/usr \\' \
+            '	) >$(PKG_BUILD_DIR)/configure.log 2>&1 || { echo "=== configure.log ==="; cat $(PKG_BUILD_DIR)/configure.log; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v45b] ERROR: Makefile not generated by configure"; echo "=== configure.log ==="; cat $(PKG_BUILD_DIR)/configure.log; exit 1; }' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '    @echo "=== v45a BUILD ==="' \
-            '    @echo "AST_INC=$(AST_INC)"' \
-            '    @echo "TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '    @if [ -x "$(PKG_BUILD_DIR)/bootstrap" ]; then (cd $(PKG_BUILD_DIR) && ./bootstrap) || true; else echo "[v45a] bootstrap skipped"; fi' \
-            '    $(MAKE) -C $(PKG_BUILD_DIR) \' \
-            '        CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" \' \
-            '        CFLAGS="$(TARGET_CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -isystem $(TOOLCHAIN_INC) -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -Os -pipe -fPIC -fstack-protector" \' \
-            '        LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib"' \
-            '    @test -f $(PKG_BUILD_DIR)/chan_quectel.so || { echo "ERROR: chan_quectel.so NOT built"; exit 1; }' \
-            '    @echo "=== v45a SUCCESS: chan_quectel.so built ==="' \
+            '	@echo "[v45b] Building (full project make)"' \
+            '	$(MAKE) -C $(PKG_BUILD_DIR) \\' \
+            '		CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" \\' \
+            '		CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" \\' \
+            '		CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" \\' \
+            '		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib" || exit $$?' \
+            '	@if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
+            '	@test -f $(PKG_BUILD_DIR)/chan_quectel.so || { echo "[v45b] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
-            '    $(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
-            '    $(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
+            '	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
+            '	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
             'endef' \
             '' \
             '$(eval $(call BuildPackage,chan_quectel))' \
@@ -216,10 +234,10 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v45a ready ==="
-          nl -ba "$MF" | sed -n '1,240p'
+          echo "=== chan_quectel Makefile v45b ==="
+          nl -ba "$MF" | sed -n '1,260p'
 
-      - name: Enable chan_quectel + final build
+      - name: Enable chan_quectel and build
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
