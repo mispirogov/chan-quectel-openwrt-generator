@@ -59,7 +59,6 @@ jobs:
           if [ -z "$ASTERISK_VERSION_NUM" ]; then ASTERISK_VERSION_NUM="0"; fi
           echo "ASTERISK_VER=$AST_VER" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
-          echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
 
       - name: Minimal .config (build asterisk first)
         working-directory: ${{ env.SDK_DIR }}
@@ -82,7 +81,7 @@ jobs:
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude.h
+      - name: Add chan_quectel source + preinclude.h (v36b)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -106,12 +105,23 @@ jobs:
             '#undef _FORTIFY_SOURCE' \
             '#define _FORTIFY_SOURCE 0' \
             '' \
+            '#include <features.h>' \
+            '#include <stdint.h>' \
+            '#include <stddef.h>' \
+            '#include <stdarg.h>' \
+            '#include <limits.h>' \
+            '#include <sys/types.h>' \
+            '#include <stdio.h>' \
+            '#include <time.h>' \
+            '#include <string.h>' \
+            '#include <pthread.h>' \
+            '' \
             '#endif' > "$PRE"
 
-          echo "=== preinclude.h v34b ==="
+          echo "=== preinclude.h v36b ==="
           cat "$PRE"
 
-      - name: Write chan_quectel Makefile (v34b — patch staging headers + direct TARGET_CC)
+      - name: Write chan_quectel Makefile (v36b — fixed AST_INC + robust astmm patch + full make)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -121,18 +131,17 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v34b' \
+            'PKG_RELEASE:=v36b' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
             '' \
+            '# Root staging_dir contains toolchain-* and target-*' \
+            'TOOLCHAIN_INC:=$(firstword $(wildcard $(STAGING_DIR)/toolchain-*/include))' \
+            'AST_INC:=$(firstword $(wildcard $(STAGING_DIR)/target-*/usr/include/asterisk))' \
+            'TARGET_INC:=$(patsubst %/asterisk,%,$(AST_INC))' \
+            '' \
             'include $(INCLUDE_DIR)/package.mk' \
-            '' \
-            '# Asterisk headers in target staging' \
-            'AST_INC:=$(STAGING_DIR)/usr/include/asterisk' \
-            '' \
-            '# Toolchain libc headers (SDK 24.10 musl)' \
-            'TOOLCHAIN_INC:=$(firstword $(wildcard $(TOPDIR)/staging_dir/toolchain-*/include))' \
             '' \
             'define Package/chan_quectel' \
             '	SECTION:=net' \
@@ -149,39 +158,33 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '	@echo "[v34b] Patching Asterisk headers for musl compatibility: $(AST_INC)"' \
+            '	@echo "[v36b] AST_INC=$(AST_INC)"' \
+            '	@echo "[v36b] TARGET_INC=$(TARGET_INC)"' \
+            '	@echo "[v36b] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
             '	@test -f "$(AST_INC)/compat.h" || { echo "ERROR: compat.h not found"; exit 1; }' \
             '	@test -f "$(AST_INC)/astmm.h"  || { echo "ERROR: astmm.h not found"; exit 1; }' \
-            '	@grep -q "^#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v34b] compat.h already ok" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v34b] compat.h patched")' \
-            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v34b] astmm.h already patched" || (' \
-            '		grep -q "^#define[[:space:]]\\+ASTMM_LIBC[[:space:]]\\+ASTMM_BLOCK" "$(AST_INC)/astmm.h" && ' \
-            '		perl -0777 -i -pe '"'"'s/^#define\\s+ASTMM_LIBC\\s+ASTMM_BLOCK\\s*$/#if defined(__UCLIBC__) || defined(__GLIBC__)\\n#define ASTMM_LIBC ASTMM_BLOCK\\n#else\\n#define ASTMM_LIBC ASTMM_IGNORE\\n#endif /* OPENWRT_MUSL_ASTMM */\\n/m'"'"' "$(AST_INC)/astmm.h" && ' \
-            '		echo "[v34b] astmm.h patched" || echo "[v34b] astmm.h: no ASTMM_BLOCK line found, skip"' \
-            '	)' \
+            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "ERROR: toolchain headers not found"; exit 1; }' \
+            '	@if grep -q "<pthread.h>" "$(AST_INC)/compat.h"; then echo "[v36b] compat.h already patched"; else sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v36b] compat.h patched"; fi' \
+            '	@if grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h"; then echo "[v36b] astmm.h already patched"; else ' \
+            '		sed -i -E "s|^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK[[:space:]]*$|#if defined(__UCLIBC__) || defined(__GLIBC__)\\\\n#define ASTMM_LIBC ASTMM_BLOCK\\\\n#else\\\\n#define ASTMM_LIBC ASTMM_IGNORE\\\\n#endif /* OPENWRT_MUSL_ASTMM */|" "$(AST_INC)/astmm.h" && echo "[v36b] astmm.h patched"; ' \
+            '	fi' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "=== v34b DIAGNOSTICS ==="' \
+            '	@echo "=== v36b DIAGNOSTICS ==="' \
             '	@echo "AST_INC=$(AST_INC)"' \
+            '	@echo "TARGET_INC=$(TARGET_INC)"' \
             '	@echo "TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "ERROR: toolchain stdint.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/compiler.h" || { echo "ERROR: asterisk compiler.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/autoconfig.h" || { echo "ERROR: asterisk autoconfig.h not found"; exit 1; }' \
-            '	@echo "=== v34b COMPILING ==="' \
-            '	$(TARGET_CC) -shared -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \' \
-            '		-include $(PKG_BUILD_DIR)/preinclude.h \' \
-            '		-isystem $(TOOLCHAIN_INC) \' \
-            '		-include $(AST_INC)/compiler.h \' \
-            '		-include $(AST_INC)/autoconfig.h \' \
-            '		-I$(STAGING_DIR)/usr/include \' \
-            '		-I$(AST_INC) \' \
-            '		-I$(STAGING_DIR)/usr/include/libusb-1.0 \' \
-            '		-DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) \' \
-            '		-DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -DAST_MODULE=\\"chan_quectel\\" \' \
-            '		-o $(PKG_BUILD_DIR)/chan_quectel.so $(PKG_BUILD_DIR)/chan_quectel.c \' \
-            '		-L$(STAGING_DIR)/usr/lib -lusb-1.0 -lasound -lssl -lcrypto' \
+            '	@test -f "$(PKG_BUILD_DIR)/preinclude.h" || { echo "ERROR: preinclude.h missing in build dir"; exit 1; }' \
+            '	@test -f "$(AST_INC)/compiler.h" || { echo "ERROR: asterisk/compiler.h missing"; exit 1; }' \
+            '	@test -f "$(AST_INC)/autoconfig.h" || { echo "ERROR: asterisk/autoconfig.h missing"; exit 1; }' \
+            '	@echo "=== v36b BUILD ==="' \
+            '	$(MAKE) -C $(PKG_BUILD_DIR) \' \
+            '		CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" \' \
+            '		override CFLAGS="$(TARGET_CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -fPIC" \' \
+            '		LDFLAGS="$(TARGET_LDFLAGS)"' \
             '	@test -f $(PKG_BUILD_DIR)/chan_quectel.so || { echo "ERROR: chan_quectel.so NOT built"; exit 1; }' \
-            '	@echo "=== v34b SUCCESS: chan_quectel.so built ==="' \
+            '	@echo "=== v36b SUCCESS: chan_quectel.so built ==="' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -193,8 +196,8 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v34b ==="
-          nl -ba "$MF" | sed -n '1,200p'
+          echo "=== Makefile v36b ==="
+          nl -ba "$MF" | sed -n '1,220p'
 
       - name: Enable chan_quectel + final build
         working-directory: ${{ env.SDK_DIR }}
