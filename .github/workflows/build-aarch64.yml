@@ -16,8 +16,7 @@ jobs:
           set -eux
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential git wget curl rsync \
-            libncurses-dev zlib1g-dev gettext python3 unzip xz-utils zstd perl
+            build-essential git wget curl rsync libncurses-dev zlib1g-dev gettext python3 unzip xz-utils zstd perl
 
       - name: Download OpenWrt SDK 24.10.4 (mediatek filogic)
         run: |
@@ -81,7 +80,7 @@ jobs:
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude.h (v41a)
+      - name: Add chan_quectel source + preinclude.h (v41b)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -119,10 +118,10 @@ jobs:
             '' \
             '#endif' > "$PRE"
 
-          echo "=== preinclude.h v41a создан ==="
+          echo "=== preinclude.h v41b создан ==="
           cat "$PRE"
 
-      - name: Write chan_quectel Makefile (v41a — fixes: macro order + safer astmm patch + bootstrap || true)
+      - name: "Write chan_quectel Makefile (v41a — fixes: macro order + safer astmm patch)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -132,7 +131,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v41a' \
+            'PKG_RELEASE:=v41b' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
@@ -154,42 +153,29 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '	@echo "[v41a] === PATH DIAGNOSTICS ==="' \
-            '	@echo "[v41a] AST_INC=$(AST_INC)"' \
-            '	@echo "[v41a] TARGET_INC=$(TARGET_INC)"' \
-            '	@echo "[v41a] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@test -f "$(AST_INC)/compat.h" || { echo "[v41a] ERROR: compat.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v41a] ERROR: astmm.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/compiler.h" || { echo "[v41a] ERROR: compiler.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/autoconfig.h" || { echo "[v41a] ERROR: autoconfig.h not found"; exit 1; }' \
-            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "[v41a] ERROR: toolchain stdint.h not found"; exit 1; }' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v41a] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v41a] compat.h patched")' \
-            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v41a] astmm.h already patched" || (sed -i -E "s|^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK([^A-Za-z0-9_].*)?$|#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */|" "$(AST_INC)/astmm.h" && echo "[v41a] astmm.h patched")' \
+            '	@echo "[v41b] === PATH DIAGNOSTICS ==="' \
+            '	@echo "[v41b] AST_INC=$(AST_INC)"' \
+            '	@echo "[v41b] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
+            '	@test -f "$(AST_INC)/compat.h" || { echo "[v41b] ERROR: compat.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v41b] ERROR: astmm.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/compiler.h" || { echo "[v41b] ERROR: compiler.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/autoconfig.h" || { echo "[v41b] ERROR: autoconfig.h not found"; exit 1; }' \
+            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "[v41b] ERROR: toolchain stdint.h not found"; exit 1; }' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v41b] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v41b] compat.h patched")' \
+            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v41b] astmm.h already patched" || (sed -i -E "s|^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK([^A-Za-z0-9_].*)?$|#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */|" "$(AST_INC)/astmm.h" && echo "[v41b] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "=== v41a DIAGNOSTICS ==="' \
+            '	@echo "=== v41b DIAGNOSTICS ==="' \
             '	@echo "AST_INC=$(AST_INC)"' \
             '	@echo "TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@if [ -x "$(PKG_BUILD_DIR)/bootstrap" ]; then (cd $(PKG_BUILD_DIR) && ./bootstrap) || true; else echo "[v41a] bootstrap skipped"; fi' \
+            '	@if [ -x "$(PKG_BUILD_DIR)/bootstrap" ]; then (cd $(PKG_BUILD_DIR) && ./bootstrap) || true; else echo "[v41b] bootstrap skipped"; fi' \
             '	$(MAKE) -C $(PKG_BUILD_DIR) \' \
             '		CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" \' \
-            '		override CFLAGS="\' \
-            '			$(TARGET_CFLAGS) \' \
-            '			-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \' \
-            '			-isystem $(TOOLCHAIN_INC) \' \
-            '			-DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) \' \
-            '			-DAST_MODULE_SELF_SYM=__internal_asterisk_module_self \' \
-            '			-DAST_MODULE=\\\"chan_quectel\\\" \' \
-            '			-include $(PKG_BUILD_DIR)/preinclude.h \' \
-            '			-include $(AST_INC)/compiler.h \' \
-            '			-include $(AST_INC)/autoconfig.h \' \
-            '			-I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 \' \
-            '			-Os -pipe -fPIC -fstack-protector\' \
-            '		" \' \
+            '		override CFLAGS="$(TARGET_CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -isystem $(TOOLCHAIN_INC) -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -Os -pipe -fPIC -fstack-protector" \' \
             '		LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib"' \
             '	@test -f $(PKG_BUILD_DIR)/chan_quectel.so || { echo "ERROR: chan_quectel.so NOT built"; exit 1; }' \
-            '	@echo "=== v41a SUCCESS: chan_quectel.so built ==="' \
+            '	@echo "=== v41b SUCCESS: chan_quectel.so built ==="' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -201,8 +187,8 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v41a готов ==="
-          nl -ba "$MF" | sed -n '1,220p'
+          echo "=== Makefile v41b готов ==="
+          head -170 "$MF"
 
       - name: Enable chan_quectel + final build
         working-directory: ${{ env.SDK_DIR }}
