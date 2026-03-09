@@ -29,7 +29,7 @@ jobs:
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Feeds: GitHub mirrors + telephony + retry update
+      - name: Feeds GitHub mirrors + telephony + retry update
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
