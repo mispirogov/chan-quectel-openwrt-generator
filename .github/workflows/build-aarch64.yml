@@ -8,28 +8,29 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
+      - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: "Install build dependencies"
         run: |
           set -eux
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential git wget curl rsync libncurses-dev zlib1g-dev gettext python3 unzip xz-utils zstd \
+            build-essential git wget curl rsync \
+            libncurses-dev zlib1g-dev gettext python3 unzip xz-utils zstd \
             autoconf automake libtool pkg-config perl
 
-      - name: Download OpenWrt SDK 24.10.4 (mediatek filogic)
+      - name: "Download OpenWrt SDK 24.10.4 (mediatek filogic)"
         run: |
           set -eux
           mkdir -p /tmp/sdk
           cd /tmp/sdk
-          wget -O sdk.tar.zst https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          wget -O sdk.tar.zst "https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
           tar --use-compress-program=unzstd -xf sdk.tar.zst
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Feeds GitHub mirrors + telephony + retry update
+      - name: "Feeds - GitHub mirrors + telephony + retry update"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -39,9 +40,11 @@ jobs:
             -e 's|https://git.openwrt.org/project/luci.git|https://github.com/openwrt/luci.git|g' \
             -e 's|https://git.openwrt.org/feed/routing.git|https://github.com/openwrt/routing.git|g' \
             feeds.conf.default
+
           if ! grep -qE '^\s*src-git\s+telephony\s+' feeds.conf.default; then
             echo "src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.10" >> feeds.conf.default
           fi
+
           for i in 1 2 3; do
             if ./scripts/feeds update -a; then break; fi
             echo "feeds update failed (attempt $i)" >&2
@@ -50,12 +53,13 @@ jobs:
           ./scripts/feeds install -a
           test -f feeds/telephony/net/asterisk/Makefile
 
-      - name: Link asterisk + compute ASTERISK_VERSION_NUM (bash-only)
+      - name: "Link asterisk + compute ASTERISK_VERSION_NUM (bash-only)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           AST_SRC="${PWD}/feeds/telephony/net/asterisk"
           ln -sfn "${AST_SRC}" package/asterisk
+
           AST_VER="$(sed -nE 's/^PKG_VERSION:=//p' package/asterisk/Makefile | head -n1)"
           AST_VER="${AST_VER%%[^0-9.]*}"
           AST_VER="${AST_VER:-20.8.1}"
@@ -67,12 +71,14 @@ jobs:
           PATCH="${PATCH%%[^0-9]*}"
 
           ASTERISK_VERSION_NUM="$(printf "%d%02d%02d" "${MAJ:-20}" "${MIN:-8}" "${PATCH:-1}" | sed -E 's/^0+//')"
-          if [ -z "$ASTERISK_VERSION_NUM" ]; then ASTERISK_VERSION_NUM="0"; fi
+          ASTERISK_VERSION_NUM="${ASTERISK_VERSION_NUM:-0}"
 
           echo "ASTERISK_VER=$AST_VER" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
+          echo "ASTERISK_VER=$AST_VER"
+          echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
 
-      - name: Minimal .config (build asterisk first)
+      - name: "Minimal .config (build asterisk first)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -80,6 +86,7 @@ jobs:
             'CONFIG_TARGET_mediatek=y' \
             'CONFIG_TARGET_mediatek_filogic=y' \
             'CONFIG_TARGET_mediatek_filogic_DEVICE_generic=y' \
+            '' \
             'CONFIG_PACKAGE_asterisk=y' \
             'CONFIG_PACKAGE_libopenssl=y' \
             'CONFIG_PACKAGE_libiconv-full=y' \
@@ -87,13 +94,13 @@ jobs:
             'CONFIG_PACKAGE_libusb-1.0=y' > .config
           make defconfig
 
-      - name: Build Asterisk first (populate staging)
+      - name: "Build Asterisk first (populate staging)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude.h (v48c)
+      - name: "Add chan_quectel source + preinclude.h (v49c)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -122,29 +129,31 @@ jobs:
             '' \
             '#endif' > "$PRE"
 
-          echo "=== preinclude.h v48c ==="
+          echo "=== preinclude.h v49c ==="
           cat "$PRE"
 
-      - name: Write chan_quectel Makefile (v48c)
+      - name: "Write chan_quectel Makefile (v49c - lazy vars + TOOLCHAIN_DIR + tolerant astmm patch)"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           MF="package/feeds/custom/chan_quectel/Makefile"
+
           printf '%s\n' \
             'include $(TOPDIR)/rules.mk' \
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v48c' \
+            'PKG_RELEASE:=v49c' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
             '' \
             'include $(INCLUDE_DIR)/package.mk' \
             '' \
-            'AST_INC := $(STAGING_DIR_TARGET)/usr/include/asterisk' \
-            'TARGET_INC := $(STAGING_DIR_TARGET)/usr/include' \
-            'TOOLCHAIN_INC := $(firstword $(wildcard $(STAGING_DIR)/toolchain-*/include))' \
+            '# lazy = to avoid early /usr/include fallback' \
+            'AST_INC = $(STAGING_DIR_TARGET)/usr/include/asterisk' \
+            'TARGET_INC = $(STAGING_DIR_TARGET)/usr/include' \
+            'TOOLCHAIN_INC = $(if $(TOOLCHAIN_DIR),$(TOOLCHAIN_DIR)/include,$(if $(STAGING_DIR_TOOLCHAIN),$(STAGING_DIR_TOOLCHAIN)/include,$(firstword $(wildcard $(STAGING_DIR)/toolchain-*/include))))' \
             '' \
             'TARGET_CFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CFLAGS))' \
             'TARGET_CPPFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CPPFLAGS))' \
@@ -160,33 +169,37 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '	@echo "[v48c] AST_INC=$(AST_INC)"' \
-            '	@echo "[v48c] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@echo "[v48c] ASTERISK_VER=$(ASTERISK_VER)"' \
-            '	@test -n "$(TOOLCHAIN_INC)" || { echo "[v48c] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
-            '	@test -n "$(ASTERISK_VER)" || { echo "[v48c] ERROR: ASTERISK_VER empty"; exit 1; }' \
-            '	@test -f "$(AST_INC)/compat.h" || { echo "[v48c] ERROR: compat.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v48c] ERROR: astmm.h not found"; exit 1; }' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v48c] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v48c] compat.h patched")' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v48c] ERROR: compat.h patch failed"; exit 1; }' \
-            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" && echo "[v48c] astmm.h already patched" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v48c] astmm.h patched")' \
-            '	@grep -q "OPENWRT_MUSL_ASTMM" "$(AST_INC)/astmm.h" || { echo "[v48c] ERROR: astmm.h patch failed"; exit 1; }' \
+            '	@echo "[v49c] AST_INC=$(AST_INC)"' \
+            '	@echo "[v49c] TARGET_INC=$(TARGET_INC)"' \
+            '	@echo "[v49c] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
+            '	@echo "[v49c] STAGING_DIR_TOOLCHAIN=$(STAGING_DIR_TOOLCHAIN)"' \
+            '	@echo "[v49c] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
+            '	@echo "[v49c] ASTERISK_VER=$(ASTERISK_VER)"' \
+            '	@test -n "$(AST_INC)" || { echo "[v49c] ERROR: AST_INC empty"; exit 1; }' \
+            '	@test -n "$(TOOLCHAIN_INC)" || { echo "[v49c] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
+            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "[v49c] ERROR: $(TOOLCHAIN_INC)/stdint.h missing"; exit 1; }' \
+            '	@test -f "$(AST_INC)/compat.h" || { echo "[v49c] ERROR: compat.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v49c] ERROR: astmm.h not found"; exit 1; }' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v49c] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v49c] compat.h patched")' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v49c] ERROR: compat.h patch failed"; exit 1; }' \
+            '	@{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v49c] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v49c] astmm.h patched")' \
+            '	@grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v49c] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Configure' \
-            '	@echo "[v48c] Running bootstrap + configure..."' \
+            '	@echo "[v49c] bootstrap + autoreconf (if needed)"' \
             '	(cd $(PKG_BUILD_DIR); [ -x ./bootstrap ] && ./bootstrap || true)' \
-            '	(cd $(PKG_BUILD_DIR); [ -x ./configure ] || PATH="$(STAGING_DIR)/host/bin:$$PATH" autoreconf -fi)' \
-            '	(cd $(PKG_BUILD_DIR); [ -x ./configure ] || chmod +x ./configure || true)' \
-            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v48c] configure failed"; test -f $(PKG_BUILD_DIR)/config.log && { echo "=== config.log (tail) ==="; tail -n 200 $(PKG_BUILD_DIR)/config.log; }; exit 1; }' \
-            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v48c] ERROR: Makefile not generated"; test -f $(PKG_BUILD_DIR)/config.log && { echo "=== config.log (tail) ==="; tail -n 200 $(PKG_BUILD_DIR)/config.log; }; exit 1; }' \
+            '	(cd $(PKG_BUILD_DIR); [ -x ./configure ] || autoreconf -fi)' \
+            '	@echo "[v49c] ./configure --with-astversion=$(ASTERISK_VER)"' \
+            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v49c] configure failed"; if [ -f $(PKG_BUILD_DIR)/config.log ]; then echo "=== config.log ==="; cat $(PKG_BUILD_DIR)/config.log; fi; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v49c] ERROR: Makefile not generated"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "[v48c] Building..."' \
-            '	$(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib"' \
+            '	@echo "[v49c] Building..."' \
+            '	$(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self" LDFLAGS="$(TARGET_LDFLAGS) -L$(STAGING_DIR_TARGET)/usr/lib"' \
             '	@if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v48c] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v49c] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -194,14 +207,15 @@ jobs:
             '	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
             'endef' \
             '' \
-            '$(eval $(call BuildPackage,chan_quectel))' > "$MF"
+            '$(eval $(call BuildPackage,chan_quectel))' \
+            > "$MF"
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v48c ==="
+          echo "=== Makefile v49c ==="
           nl -ba "$MF" | sed -n '1,260p'
 
-      - name: Enable chan_quectel + final build
+      - name: "Enable chan_quectel + final build"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -209,11 +223,17 @@ jobs:
           make defconfig
           make package/feeds/custom/chan_quectel/compile V=s -j"$(nproc)"
 
-      - name: Collect artifacts
+      - name: "Collect artifacts"
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           mkdir -p /tmp/artifacts
-          find . -name "chan_quectel*.ipk" -exec cp -v {} /tmp/artifacts/ \; || true
-          find build_dir -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
+          find bin/packages -type f -name "chan_quectel_*.ipk" -exec cp -v {} /tmp/artifacts/ \; || true
+          find build_dir -type f -name "chan_quectel.so" -exec cp -v {} /tmp/artifacts/ \; || true
           ls -la /tmp/artifacts
+
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: chan_quectel-ipk
+          path: /tmp/artifacts/*
