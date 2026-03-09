@@ -30,7 +30,7 @@ jobs:
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
 
-      - name: Feeds - GitHub mirrors + telephony + retry update
+      - name: Feeds GitHub mirrors telephony retry update
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -53,7 +53,7 @@ jobs:
           ./scripts/feeds install -a
           test -f feeds/telephony/net/asterisk/Makefile
 
-      - name: Link asterisk + compute ASTERISK_VERSION_NUM (bash-only)
+      - name: Link asterisk compute ASTERISK_VERSION_NUM
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -78,7 +78,7 @@ jobs:
           echo "ASTERISK_VER=$AST_VER"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM"
 
-      - name: Minimal .config (build asterisk first)
+      - name: Minimal config build asterisk first
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -93,13 +93,13 @@ jobs:
             'CONFIG_PACKAGE_libusb-1.0=y' > .config
           make defconfig
 
-      - name: Build Asterisk first (populate staging)
+      - name: Build Asterisk populate staging
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude.h (v50d)
+      - name: Add chan_quectel source and preinclude v52a
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -125,13 +125,21 @@ jobs:
             '#define _FORTIFY_SOURCE 0' \
             '' \
             '#include <features.h>' \
+            '#include <stdint.h>' \
+            '#include <sys/types.h>' \
+            '#include <sys/socket.h>' \
+            '#include <netinet/in.h>' \
+            '#include <pthread.h>' \
+            '#include <time.h>' \
+            '#include <stdio.h>' \
+            '#include <string.h>' \
             '' \
             '#endif' > "$PRE"
 
-          echo "=== preinclude.h v50d ==="
+          echo "=== preinclude.h v52a ==="
           cat "$PRE"
 
-      - name: Write chan_quectel Makefile (v50d - robust AST_INC from TOPDIR/staging_dir)
+      - name: Write chan_quectel Makefile v52a
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -142,7 +150,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v50d' \
+            'PKG_RELEASE:=v52a' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
@@ -151,10 +159,13 @@ jobs:
             '' \
             '# Resolve staging paths without relying on STAGING_DIR_TARGET (custom-pkg safe)' \
             'STAGING_DIR_ROOT = $(TOPDIR)/staging_dir' \
-            'TARGET_STAGING = $(firstword $(wildcard $(STAGING_DIR_ROOT)/target-* ))' \
+            'TARGET_STAGING = $(firstword $(wildcard $(STAGING_DIR_ROOT)/target-*))' \
             'AST_INC = $(TARGET_STAGING)/usr/include/asterisk' \
             'TARGET_INC = $(TARGET_STAGING)/usr/include' \
-            'TOOLCHAIN_INC = $(if $(TOOLCHAIN_DIR),$(TOOLCHAIN_DIR)/include,$(firstword $(wildcard $(STAGING_DIR_ROOT)/toolchain-*/include )))' \
+            '' \
+            '# Prefer musl libc headers from toolchain usr/include when present' \
+            'TOOLCHAIN_BASE = $(if $(TOOLCHAIN_DIR),$(TOOLCHAIN_DIR),$(firstword $(wildcard $(STAGING_DIR_ROOT)/toolchain-*)))' \
+            'TOOLCHAIN_SYSINC = $(if $(wildcard $(TOOLCHAIN_BASE)/usr/include/features.h),$(TOOLCHAIN_BASE)/usr/include,$(TOOLCHAIN_BASE)/include)' \
             '' \
             'TARGET_CFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CFLAGS))' \
             'TARGET_CPPFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CPPFLAGS))' \
@@ -170,36 +181,47 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '	@echo "[v50d] STAGING_DIR_ROOT=$(STAGING_DIR_ROOT)"' \
-            '	@echo "[v50d] TARGET_STAGING=$(TARGET_STAGING)"' \
-            '	@echo "[v50d] AST_INC=$(AST_INC)"' \
-            '	@echo "[v50d] TARGET_INC=$(TARGET_INC)"' \
-            '	@echo "[v50d] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
-            '	@echo "[v50d] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@echo "[v50d] ASTERISK_VER=$(ASTERISK_VER)"' \
-            '	@test -n "$(TARGET_STAGING)" || { echo "[v50d] ERROR: TARGET_STAGING empty"; exit 1; }' \
-            '	@test -f "$(AST_INC)/compat.h" || { echo "[v50d] ERROR: compat.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v50d] ERROR: astmm.h not found"; exit 1; }' \
-            '	@test -f "$(TOOLCHAIN_INC)/stdint.h" || { echo "[v50d] ERROR: toolchain stdint.h not found"; exit 1; }' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v50d] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v50d] compat.h patched")' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v50d] ERROR: compat.h patch failed"; exit 1; }' \
-            '	@{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v50d] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v50d] astmm.h patched")' \
-            '	@grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v50d] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
+            '	@echo "[v52a] TARGET_STAGING=$(TARGET_STAGING)"' \
+            '	@echo "[v52a] AST_INC=$(AST_INC)"' \
+            '	@echo "[v52a] TARGET_INC=$(TARGET_INC)"' \
+            '	@echo "[v52a] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
+            '	@echo "[v52a] TOOLCHAIN_BASE=$(TOOLCHAIN_BASE)"' \
+            '	@echo "[v52a] TOOLCHAIN_SYSINC=$(TOOLCHAIN_SYSINC)"' \
+            '	@echo "[v52a] ASTERISK_VER=$(ASTERISK_VER)"' \
+            '	@test -n "$(TARGET_STAGING)" || { echo "[v52a] ERROR: TARGET_STAGING empty"; exit 1; }' \
+            '	@case "$(AST_INC)" in /usr/*) echo "[v52a] ERROR: AST_INC resolved to host path: $(AST_INC)"; exit 1;; esac' \
+            '	@test -f "$(AST_INC)/compat.h" || { echo "[v52a] ERROR: compat.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v52a] ERROR: astmm.h not found"; exit 1; }' \
+            '	@test -f "$(TOOLCHAIN_SYSINC)/features.h" || { echo "[v52a] ERROR: toolchain features.h not found"; exit 1; }' \
+            '	@test -f "$(TOOLCHAIN_SYSINC)/stdint.h" || { echo "[v52a] ERROR: toolchain stdint.h not found"; exit 1; }' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v52a] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v52a] compat.h patched")' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v52a] ERROR: compat.h patch failed"; exit 1; }' \
+            '	@{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v52a] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v52a] astmm.h patched")' \
+            '	@grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v52a] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Configure' \
-            '	@echo "[v50d] Running bootstrap + configure..."' \
+            '	@echo "[v52a] Running bootstrap + configure..."' \
             '	(cd $(PKG_BUILD_DIR); [ -x ./bootstrap ] && ./bootstrap || true)' \
             '	(cd $(PKG_BUILD_DIR); [ -x ./configure ] || autoreconf -fi)' \
-            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="$(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(PKG_BUILD_DIR)/preinclude.h -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS)" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v50d] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
-            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v50d] ERROR: Makefile not generated"; exit 1; }' \
+            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) \' \
+            '	CPPFLAGS="-D_GNU_SOURCE=1 -D_DEFAULT_SOURCE=1 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_POSIX_TIMERS=1 -D__USE_GNU=1 -D_FILE_OFFSET_BITS=64 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_SYSINC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self" \' \
+            '	CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" \' \
+            '	LDFLAGS="$(TARGET_LDFLAGS)" \' \
+            '	./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v52a] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v52a] ERROR: Makefile not generated"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "[v50d] Building..."' \
-            '	$(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)"' \
+            '	@echo "[v52a] Building..."' \
+            '	@test -f "$(AST_INC)/compiler.h" || { echo "[v52a] ERROR: compiler.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/autoconfig.h" || { echo "[v52a] ERROR: autoconfig.h not found"; exit 1; }' \
+            '	$(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" \' \
+            '	CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" \' \
+            '	CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_SYSINC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" \' \
+            '	LDFLAGS="$(TARGET_LDFLAGS)"' \
             '	@if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v50d] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v52a] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -211,10 +233,10 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v50d ==="
-          nl -ba "$MF" | sed -n '1,260p'
+          echo "=== Makefile v52a ==="
+          nl -ba "$MF" | sed -n '1,320p'
 
-      - name: Enable chan_quectel + final build
+      - name: Enable chan_quectel and final build
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
