@@ -99,7 +99,38 @@ jobs:
           set -eux
           make package/asterisk/compile -j"$(nproc)" V=s
 
-      - name: Add chan_quectel source + preinclude (v54c)
+      - name: Ensure asterisk.h is staged (v54d)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          TARGET_STAGING="$(ls -d staging_dir/target-* | head -n1)"
+          TARGET_INC="${TARGET_STAGING}/usr/include"
+          AST_DIR="${TARGET_INC}/asterisk"
+
+          echo "[v54d] TARGET_STAGING=$TARGET_STAGING"
+          echo "[v54d] TARGET_INC=$TARGET_INC"
+          echo "[v54d] AST_DIR=$AST_DIR"
+
+          mkdir -p "$AST_DIR"
+
+          if [ ! -f "$AST_DIR/asterisk.h" ]; then
+            echo "[v54d] asterisk.h missing in staging, searching in build_dir..."
+            SRC="$(find build_dir -type f -name asterisk.h 2>/dev/null \
+              | grep -E '/asterisk-[^/]+/include(/asterisk)?/asterisk\.h$' \
+              | head -n1 || true)"
+            if [ -z "$SRC" ]; then
+              echo "[v54d] ERROR: cannot locate asterisk.h in build_dir"
+              find build_dir -maxdepth 3 -type d -name 'asterisk-*' -print || true
+              exit 1
+            fi
+            install -m 0644 "$SRC" "$AST_DIR/asterisk.h"
+            echo "[v54d] staged: $SRC -> $AST_DIR/asterisk.h"
+          fi
+
+          test -f "$AST_DIR/asterisk.h"
+          ls -la "$AST_DIR" | sed -n '1,200p'
+
+      - name: Add chan_quectel source + preinclude (v54d)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -166,12 +197,12 @@ jobs:
             '' \
             '#endif' > "$PRE_BUILD"
 
-          echo "=== preinclude_config.h v54c ==="
+          echo "=== preinclude_config.h v54d ==="
           cat "$PRE_CFG"
-          echo "=== preinclude_build.h v54c ==="
+          echo "=== preinclude_build.h v54d ==="
           cat "$PRE_BUILD"
 
-      - name: Write chan_quectel Makefile (v54c - ensure asterisk.h in AST_INC)
+      - name: Write chan_quectel Makefile (v54d - auto-stage asterisk.h + safer Prepare)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -182,7 +213,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v54c' \
+            'PKG_RELEASE:=v54d' \
             '' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
@@ -210,41 +241,40 @@ jobs:
             'define Build/Prepare' \
             '	$(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '	$(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '	@echo "[v54c] TARGET_STAGING=$(TARGET_STAGING)"' \
-            '	@echo "[v54c] TARGET_INC=$(TARGET_INC)"' \
-            '	@echo "[v54c] AST_INC=$(AST_INC)"' \
-            '	@echo "[v54c] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
-            '	@echo "[v54c] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '	@echo "[v54c] ASTERISK_VER=$(ASTERISK_VER)"' \
-            '	@test -n "$(TARGET_STAGING)" || { echo "[v54c] ERROR: TARGET_STAGING empty"; exit 1; }' \
-            '	@test -n "$(TOOLCHAIN_INC)" || { echo "[v54c] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
-            '	@test -d "$(AST_INC)" || { echo "[v54c] ERROR: AST_INC dir missing: $(AST_INC)"; ls -la "$(TARGET_INC)" | sed -n "1,200p"; exit 1; }' \
-            '	@test -f "$(AST_INC)/compat.h" || { echo "[v54c] ERROR: compat.h not found"; exit 1; }' \
-            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v54c] ERROR: astmm.h not found"; exit 1; }' \
-            '	@test -f "$(PKG_BUILD_DIR)/preinclude_config.h" || { echo "[v54c] ERROR: preinclude_config.h missing"; exit 1; }' \
-            '	@test -f "$(PKG_BUILD_DIR)/preinclude_build.h" || { echo "[v54c] ERROR: preinclude_build.h missing"; exit 1; }' \
-            '	@if [ ! -f "$(AST_INC)/asterisk.h" ]; then echo "[v54c] asterisk.h missing in $(AST_INC) - trying to copy from build_dir"; AHH="$$(ls -1 $(TOPDIR)/build_dir/target-*/asterisk-*/include/asterisk.h 2>/dev/null | head -n1)"; if [ -n "$$AHH" ] && [ -f "$$AHH" ]; then cp -f "$$AHH" "$(AST_INC)/asterisk.h"; echo "[v54c] copied asterisk.h from $$AHH"; else echo "[v54c] ERROR: cannot locate asterisk.h in build_dir (expected .../asterisk-*/include/asterisk.h)"; ls -ld $(TOPDIR)/build_dir/target-*/asterisk-* 2>/dev/null || true; exit 1; fi; fi' \
-            '	@test -f "$(AST_INC)/asterisk.h" || { echo "[v54c] ERROR: asterisk.h still missing in $(AST_INC)"; ls -la "$(AST_INC)" | sed -n "1,200p"; exit 1; }' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v54c] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v54c] compat.h patched")' \
-            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v54c] ERROR: compat.h patch failed"; exit 1; }' \
-            '	@{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v54c] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v54c] astmm.h patched")' \
-            '	@grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v54c] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
+            '	@echo "[v54d] TARGET_STAGING=$(TARGET_STAGING)"' \
+            '	@echo "[v54d] TARGET_INC=$(TARGET_INC)"' \
+            '	@echo "[v54d] AST_INC=$(AST_INC)"' \
+            '	@echo "[v54d] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
+            '	@echo "[v54d] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
+            '	@echo "[v54d] ASTERISK_VER=$(ASTERISK_VER)"' \
+            '	@test -n "$(TARGET_STAGING)" || { echo "[v54d] ERROR: TARGET_STAGING empty"; exit 1; }' \
+            '	@test -n "$(TOOLCHAIN_INC)" || { echo "[v54d] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
+            '	@test -d "$(AST_INC)" || { echo "[v54d] ERROR: AST_INC dir missing: $(AST_INC)"; ls -la "$(TARGET_INC)" | sed -n "1,200p"; exit 1; }' \
+            '	@if [ ! -f "$(AST_INC)/asterisk.h" ]; then echo "[v54d] asterisk.h missing in $(AST_INC) - trying to locate in build_dir"; AH=$$(find $(TOPDIR)/build_dir -type f -name asterisk.h 2>/dev/null | grep -E "/asterisk-[^/]+/include(/asterisk)?/asterisk\\.h$$" | head -n1 || true); if [ -n "$$AH" ]; then cp "$$AH" "$(AST_INC)/asterisk.h"; echo "[v54d] copied $$AH -> $(AST_INC)/asterisk.h"; fi; fi' \
+            '	@test -f "$(AST_INC)/asterisk.h" || { echo "[v54d] ERROR: asterisk.h not found in $(AST_INC)"; ls -la "$(AST_INC)" | sed -n "1,200p"; exit 1; }' \
+            '	@test -f "$(AST_INC)/compat.h" || { echo "[v54d] ERROR: compat.h not found"; exit 1; }' \
+            '	@test -f "$(AST_INC)/astmm.h" || { echo "[v54d] ERROR: astmm.h not found"; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/preinclude_config.h" || { echo "[v54d] ERROR: preinclude_config.h missing"; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/preinclude_build.h" || { echo "[v54d] ERROR: preinclude_build.h missing"; exit 1; }' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v54d] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v54d] compat.h patched")' \
+            '	@grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v54d] ERROR: compat.h patch failed"; exit 1; }' \
+            '	@{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v54d] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v54d] astmm.h patched")' \
+            '	@grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v54d] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Configure' \
-            '	@echo "[v54c] Running bootstrap + configure..."' \
+            '	@echo "[v54d] Running bootstrap + configure..."' \
             '	(cd $(PKG_BUILD_DIR); [ -x ./bootstrap ] && ./bootstrap || true)' \
             '	(cd $(PKG_BUILD_DIR); [ -x ./configure ] || autoreconf -fi)' \
-            '	# ВАЖНО: не добавляем -I$(TARGET_INC) и -I$(AST_INC) в configure, чтобы autoconf-тесты не подхватывали asterisk/* заголовки' \
-            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude_config.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" LDFLAGS="$(TARGET_LDFLAGS)" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v54c] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
-            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v54c] ERROR: Makefile not generated"; exit 1; }' \
+            '	cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude_config.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" LDFLAGS="$(TARGET_LDFLAGS)" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(TARGET_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v54d] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v54d] ERROR: Makefile not generated"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '	@echo "[v54c] Building..."' \
+            '	@echo "[v54d] Building..."' \
             '	$(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude_build.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(AST_INC) -I$(TARGET_INC)/libusb-1.0 -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS)"' \
             '	@if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v54c] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '	@test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v54d] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
@@ -256,7 +286,7 @@ jobs:
 
           perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
-          echo "=== Makefile v54c ==="
+          echo "=== Makefile v54d ==="
           nl -ba "$MF" | sed -n '1,360p'
 
       - name: Enable chan_quectel + final build
