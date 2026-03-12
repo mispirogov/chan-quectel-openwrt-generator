@@ -93,6 +93,7 @@ jobs:
             'CONFIG_PACKAGE_asterisk=y' \
             'CONFIG_PACKAGE_libopenssl=y' \
             'CONFIG_PACKAGE_libiconv-full=y' \
+            'CONFIG_PACKAGE_libsqlite3=y' \
             'CONFIG_PACKAGE_alsa-lib=y' \
             'CONFIG_PACKAGE_libusb-1.0=y' > .config
           make defconfig
@@ -104,7 +105,54 @@ jobs:
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
 
-      - name: Add chan_quectel source + preinclude (v55a)
+      - name: Normalize staged Asterisk headers for chan_quectel (v55g)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+
+          TARGET_STAGING="$(ls -d staging_dir/target-* | head -n1)"
+          TARGET_INC="${TARGET_STAGING}/usr/include"
+          AST_VERSIONED_HEADERS="$(find "$TARGET_INC" -maxdepth 2 -type d -path "$TARGET_INC/asterisk-*/include" | head -n1 || true)"
+          AST_HEADERS=""
+          AST_INC=""
+
+          echo "[v55g] TARGET_STAGING=$TARGET_STAGING"
+          echo "[v55g] TARGET_INC=$TARGET_INC"
+          echo "[v55g] AST_VERSIONED_HEADERS=$AST_VERSIONED_HEADERS"
+
+          if [ -n "$AST_VERSIONED_HEADERS" ]; then
+            AST_HEADERS="$AST_VERSIONED_HEADERS"
+            AST_INC="$AST_HEADERS/asterisk"
+          elif [ -d "$TARGET_INC/asterisk" ]; then
+            AST_HEADERS="$TARGET_INC"
+            AST_INC="$TARGET_INC/asterisk"
+          else
+            echo "[v55g] ERROR: no staged Asterisk headers root found"
+            find "$TARGET_INC" -maxdepth 3 \( -name 'asterisk*' -o -name 'sqlite3.h' -o -name 'iconv.h' \) -print | sort || true
+            exit 1
+          fi
+
+          echo "[v55g] AST_HEADERS=$AST_HEADERS"
+          echo "[v55g] AST_INC=$AST_INC"
+
+          if [ ! -f "$AST_HEADERS/asterisk.h" ]; then
+            echo "[v55g] asterisk.h missing in staged include root, searching build_dir"
+            SRC_ASTERISK_H="$(find build_dir -type f -path '*/asterisk-*/include/asterisk.h' | head -n1 || true)"
+            echo "[v55g] SRC_ASTERISK_H=$SRC_ASTERISK_H"
+            test -n "$SRC_ASTERISK_H" || { echo "[v55g] ERROR: cannot locate build_dir copy of asterisk.h"; exit 1; }
+            cp -f "$SRC_ASTERISK_H" "$AST_HEADERS/asterisk.h"
+          fi
+
+          test -f "$AST_HEADERS/asterisk.h"
+          test -f "$AST_INC/compat.h"
+          test -f "$AST_INC/astmm.h"
+          test -f "$TARGET_INC/sqlite3.h"
+          test -f "$TARGET_INC/iconv.h"
+
+          echo "=== v55g staged header probe ==="
+          find "$TARGET_INC" -maxdepth 3 \( -name 'asterisk.h' -o -name 'compat.h' -o -name 'astmm.h' -o -name 'sqlite3.h' -o -name 'iconv.h' \) -print | sort
+
+      - name: Add chan_quectel source (v55g)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -113,118 +161,7 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-          PRE_CFG="package/feeds/custom/chan_quectel/src/preinclude_config.h"
-          printf '%s\n' \
-            '#ifndef QUECTEL_PREINCLUDE_CONFIG_H' \
-            '#define QUECTEL_PREINCLUDE_CONFIG_H' \
-            '' \
-            '#define _GNU_SOURCE 1' \
-            '#define _DEFAULT_SOURCE 1' \
-            '#define _POSIX_C_SOURCE 200809L' \
-            '#define _XOPEN_SOURCE 700' \
-            '#define _POSIX_TIMERS 1' \
-            '#define __USE_GNU 1' \
-            '#define _FILE_OFFSET_BITS 64' \
-            '' \
-            '#undef _FORTIFY_SOURCE' \
-            '#define _FORTIFY_SOURCE 0' \
-            '' \
-            '#include <features.h>' \
-            '#include <stdint.h>' \
-            '#include <sys/types.h>' \
-            '#include <sys/socket.h>' \
-            '#include <netinet/in.h>' \
-            '#include <netdb.h>' \
-            '#include <pthread.h>' \
-            '#include <time.h>' \
-            '#include <stdio.h>' \
-            '#include <string.h>' \
-            '' \
-            '#endif' > "$PRE_CFG"
-
-          PRE_BUILD="package/feeds/custom/chan_quectel/src/preinclude_build.h"
-          printf '%s\n' \
-            '#ifndef QUECTEL_PREINCLUDE_BUILD_H' \
-            '#define QUECTEL_PREINCLUDE_BUILD_H' \
-            '' \
-            '#define _GNU_SOURCE 1' \
-            '#define _DEFAULT_SOURCE 1' \
-            '#define _POSIX_C_SOURCE 200809L' \
-            '#define _XOPEN_SOURCE 700' \
-            '#define _POSIX_TIMERS 1' \
-            '#define __USE_GNU 1' \
-            '#define _FILE_OFFSET_BITS 64' \
-            '' \
-            '#undef _FORTIFY_SOURCE' \
-            '#define _FORTIFY_SOURCE 0' \
-            '' \
-            '#include <features.h>' \
-            '#include <stdint.h>' \
-            '#include <sys/types.h>' \
-            '#include <sys/socket.h>' \
-            '#include <netinet/in.h>' \
-            '#include <netdb.h>' \
-            '#include <pthread.h>' \
-            '#include <time.h>' \
-            '#include <stdio.h>' \
-            '#include <string.h>' \
-            '' \
-            '#endif' > "$PRE_BUILD"
-
-          echo "=== preinclude_config.h v55a ==="
-          cat "$PRE_CFG"
-          echo "=== preinclude_build.h v55a ==="
-          cat "$PRE_BUILD"
-
-      - name: Stage Asterisk headers for chan_quectel
-        working-directory: ${{ env.SDK_DIR }}
-        run: |
-          set -eux
-
-          TARGET_STAGING="$(ls -d staging_dir/target-* | head -n1)"
-          TARGET_INC="${TARGET_STAGING}/usr/include"
-          AST_INC="${TARGET_INC}/asterisk"
-          SRC_INC_DIR="$(find build_dir -type d -path '*/asterisk-*/include' | head -n1 || true)"
-
-          echo "[v55a] TARGET_STAGING=$TARGET_STAGING"
-          echo "[v55a] TARGET_INC=$TARGET_INC"
-          echo "[v55a] AST_INC=$AST_INC"
-          echo "[v55a] SRC_INC_DIR=$SRC_INC_DIR"
-
-          mkdir -p "$TARGET_INC"
-          mkdir -p "$AST_INC"
-
-          if [ -n "$SRC_INC_DIR" ] && [ -d "$SRC_INC_DIR/asterisk" ]; then
-            echo "[v55a] Copying include/asterisk/* from build_dir into staging"
-            rsync -a "$SRC_INC_DIR/asterisk/" "$AST_INC/"
-          fi
-
-          if [ ! -f "$TARGET_INC/asterisk.h" ] && [ -n "$SRC_INC_DIR" ] && [ -f "$SRC_INC_DIR/asterisk.h" ]; then
-            echo "[v55a] Copying include/asterisk.h from build_dir into staging"
-            cp -f "$SRC_INC_DIR/asterisk.h" "$TARGET_INC/asterisk.h"
-          fi
-
-          if [ ! -f "$TARGET_INC/asterisk.h" ]; then
-            echo "[v55a] asterisk.h still missing, writing stub"
-            printf '%s\n' \
-              '#ifndef ASTERISK_H' \
-              '#define ASTERISK_H 1' \
-              '' \
-              '/* OpenWrt staging stub for chan_quectel configure */' \
-              '#include <asterisk/autoconfig.h>' \
-              '#include <asterisk/compiler.h>' \
-              '' \
-              '#endif' > "$TARGET_INC/asterisk.h"
-          fi
-
-          test -f "$TARGET_INC/asterisk.h"
-          test -f "$AST_INC/compat.h"
-          test -f "$AST_INC/astmm.h"
-
-          echo "=== staged asterisk.h ==="
-          sed -n '1,40p' "$TARGET_INC/asterisk.h"
-
-      - name: Write chan_quectel Makefile (v55a)
+      - name: Write chan_quectel Makefile (v55g)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -235,79 +172,85 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55a' \
-            '' \
+            'PKG_RELEASE:=v55g' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk' \
+            'PKG_FIXUP:=autoreconf' \
+            'MODULES_DIR:=/usr/lib/asterisk/modules' \
             '' \
             'include $(INCLUDE_DIR)/package.mk' \
+            'include $(INCLUDE_DIR)/nls.mk' \
             '' \
-            'STAGING_DIR_ROOT = $(TOPDIR)/staging_dir' \
-            'TARGET_STAGING = $(firstword $(wildcard $(STAGING_DIR_ROOT)/target-*))' \
-            'TARGET_INC = $(TARGET_STAGING)/usr/include' \
-            'AST_INC = $(TARGET_INC)/asterisk' \
-            'TOOLCHAIN_INC = $(if $(TOOLCHAIN_DIR),$(TOOLCHAIN_DIR)/include,$(firstword $(wildcard $(STAGING_DIR_ROOT)/toolchain-*/include)))' \
+            'STAGING_INC:=$(STAGING_DIR)/usr/include' \
+            'AST_VERSIONED_HEADERS:=$(firstword $(wildcard $(STAGING_INC)/asterisk-*/include))' \
+            'AST_FLAT_HEADERS:=$(if $(wildcard $(STAGING_INC)/asterisk.h),$(STAGING_INC))' \
+            'AST_HEADERS:=$(if $(AST_VERSIONED_HEADERS),$(AST_VERSIONED_HEADERS),$(AST_FLAT_HEADERS))' \
+            'AST_INC:=$(if $(AST_HEADERS),$(AST_HEADERS)/asterisk)' \
             '' \
-            'TARGET_CFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CFLAGS))' \
-            'TARGET_CPPFLAGS_NOFORTIFY := $(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CPPFLAGS))' \
+            'TARGET_CFLAGS_NOFORTIFY:=$(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CFLAGS))' \
+            'TARGET_CPPFLAGS_NOFORTIFY:=$(filter-out -D_FORTIFY_SOURCE%,$(TARGET_CPPFLAGS))' \
+            'HOST_INCLUDE_POISON:=-I/usr/include -I/usr/local/include -isystem/usr/include -isystem/usr/local/include' \
+            'TARGET_CFLAGS_CLEAN:=$(filter-out $(HOST_INCLUDE_POISON),$(TARGET_CFLAGS_NOFORTIFY))' \
+            'TARGET_CPPFLAGS_CLEAN:=$(filter-out $(HOST_INCLUDE_POISON),$(TARGET_CPPFLAGS_NOFORTIFY))' \
             '' \
             'define Package/chan_quectel' \
-            '  SECTION:=net' \
-            '  CATEGORY:=Network' \
-            '  SUBMENU:=Telephony' \
-            '  TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            '  DEPENDS:=+asterisk +libopenssl +libiconv-full +alsa-lib +libusb-1.0' \
+            '    SECTION:=net' \
+            '    CATEGORY:=Network' \
+            '    SUBMENU:=Telephony' \
+            '    TITLE:=Asterisk channel driver for Quectel LTE modems' \
+            '    DEPENDS:=$(ICONV_DEPENDS) +asterisk +libsqlite3 +libopenssl +alsa-lib +libusb-1.0' \
             'endef' \
             '' \
             'define Build/Prepare' \
-            '  $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
-            '  $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '  @echo "[v55a] TARGET_STAGING=$(TARGET_STAGING)"' \
-            '  @echo "[v55a] TARGET_INC=$(TARGET_INC)"' \
-            '  @echo "[v55a] AST_INC=$(AST_INC)"' \
-            '  @echo "[v55a] TOOLCHAIN_DIR=$(TOOLCHAIN_DIR)"' \
-            '  @echo "[v55a] TOOLCHAIN_INC=$(TOOLCHAIN_INC)"' \
-            '  @echo "[v55a] ASTERISK_VER=$(ASTERISK_VER)"' \
-            '  @test -n "$(TARGET_STAGING)" || { echo "[v55a] ERROR: TARGET_STAGING empty"; exit 1; }' \
-            '  @test -n "$(TOOLCHAIN_INC)" || { echo "[v55a] ERROR: TOOLCHAIN_INC empty"; exit 1; }' \
-            '  @test -f "$(TARGET_INC)/asterisk.h" || { echo "[v55a] ERROR: asterisk.h not found in TARGET_INC=$(TARGET_INC)"; exit 1; }' \
-            '  @test -f "$(AST_INC)/compat.h" || { echo "[v55a] ERROR: compat.h not found"; exit 1; }' \
-            '  @test -f "$(AST_INC)/astmm.h" || { echo "[v55a] ERROR: astmm.h not found"; exit 1; }' \
-            '  @test -f "$(PKG_BUILD_DIR)/preinclude_config.h" || { echo "[v55a] ERROR: preinclude_config.h missing"; exit 1; }' \
-            '  @test -f "$(PKG_BUILD_DIR)/preinclude_build.h" || { echo "[v55a] ERROR: preinclude_build.h missing"; exit 1; }' \
-            '  @grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v55a] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55a] compat.h patched")' \
-            '  @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v55a] ERROR: compat.h patch failed"; exit 1; }' \
-            '  @{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v55a] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55a] astmm.h patched")' \
-            '  @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v55a] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
+            '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
+            '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
+            '    @echo "[v55g] STAGING_INC=$(STAGING_INC)"' \
+            '    @echo "[v55g] AST_VERSIONED_HEADERS=$(AST_VERSIONED_HEADERS)"' \
+            '    @echo "[v55g] AST_FLAT_HEADERS=$(AST_FLAT_HEADERS)"' \
+            '    @echo "[v55g] AST_HEADERS=$(AST_HEADERS)"' \
+            '    @echo "[v55g] AST_INC=$(AST_INC)"' \
+            '    @echo "[v55g] ASTERISK_VER=$(ASTERISK_VER)"' \
+            '    @test -n "$(AST_HEADERS)" || { echo "[v55g] ERROR: cannot determine Asterisk include root"; exit 1; }' \
+            '    @test -f "$(AST_HEADERS)/asterisk.h" || { echo "[v55g] ERROR: asterisk.h not found in AST_HEADERS=$(AST_HEADERS)"; exit 1; }' \
+            '    @test -f "$(AST_INC)/compat.h" || { echo "[v55g] ERROR: compat.h not found"; exit 1; }' \
+            '    @test -f "$(AST_INC)/astmm.h" || { echo "[v55g] ERROR: astmm.h not found"; exit 1; }' \
+            '    @test -f "$(STAGING_INC)/sqlite3.h" || { echo "[v55g] ERROR: sqlite3.h not found"; exit 1; }' \
+            '    @test -f "$(STAGING_INC)/iconv.h" || { echo "[v55g] ERROR: iconv.h not found"; exit 1; }' \
+            '    @printf "%s\n" "$(TARGET_CFLAGS_CLEAN) $(TARGET_CPPFLAGS_CLEAN)" | grep -Eq "(^|[[:space:]])(-I/usr/include|-I/usr/local/include|-isystem/usr/include|-isystem/usr/local/include|-isystem[[:space:]]+/usr/include|-isystem[[:space:]]+/usr/local/include)([[:space:]]|$)" && { echo "[v55g] ERROR: host include poison remains in flags"; echo "[v55g] CFLAGS=$(TARGET_CFLAGS_CLEAN)"; echo "[v55g] CPPFLAGS=$(TARGET_CPPFLAGS_CLEAN)"; exit 1; } || true' \
+            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" && echo "[v55g] compat.h already patched" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55g] compat.h patched")' \
+            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || { echo "[v55g] ERROR: compat.h patch failed"; exit 1; }' \
+            '    @{ grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" && echo "[v55g] astmm.h already IGNORE"; } || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55g] astmm.h patched")' \
+            '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || { echo "[v55g] ERROR: astmm.h not IGNORE after patch"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Configure' \
-            '  @echo "[v55a] Running bootstrap + configure..."' \
-            '  (cd $(PKG_BUILD_DIR); [ -x ./bootstrap ] && ./bootstrap || true)' \
-            '  (cd $(PKG_BUILD_DIR); [ -x ./configure ] || autoreconf -fi)' \
-            '  cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude_config.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(TARGET_INC)/libusb-1.0 -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" LDFLAGS="$(TARGET_LDFLAGS)" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(TARGET_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v55a] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
-            '  @test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v55a] ERROR: Makefile not generated"; exit 1; }' \
+            '    @echo "[v55g] Running configure..."' \
+            '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55g] ERROR: configure missing after autoreconf fixup"; exit 1; }' \
+            '    cd $(PKG_BUILD_DIR) && $(TARGET_CONFIGURE_OPTS) DESTDIR="$(MODULES_DIR)" ac_cv_type_size_t=yes ac_cv_type_ssize_t=yes CPPFLAGS="$(TARGET_CPPFLAGS_CLEAN) -I$(STAGING_INC) -I$(STAGING_INC)/libusb-1.0 -I$(AST_HEADERS) -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" CFLAGS="$(TARGET_CFLAGS_CLEAN) -fPIC -I$(STAGING_INC) -I$(STAGING_INC)/libusb-1.0 -I$(AST_HEADERS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error=format-security -Wno-error" LDFLAGS="$(TARGET_LDFLAGS)" ./configure --host=$(GNU_TARGET_NAME) --prefix=/usr --with-asterisk=$(AST_HEADERS) --with-iconv=$(STAGING_INC) --with-astversion=$(ASTERISK_VER) || { echo "[v55g] configure failed"; test -f config.log && { echo "=== config.log ==="; cat config.log; }; exit 1; }' \
+            '    @test -f "$(PKG_BUILD_DIR)/Makefile" || { echo "[v55g] ERROR: Makefile not generated"; exit 1; }' \
             'endef' \
             '' \
             'define Build/Compile' \
-            '  @echo "[v55a] Building..."' \
-            '  $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_NOFORTIFY) -fPIC -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error" CPPFLAGS="-include $(PKG_BUILD_DIR)/preinclude_build.h $(TARGET_CPPFLAGS_NOFORTIFY) -isystem $(TOOLCHAIN_INC) -I$(TARGET_INC) -I$(TARGET_INC)/libusb-1.0 -include $(AST_INC)/compiler.h -include $(AST_INC)/autoconfig.h -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS)"' \
-            '  @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '  @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55a] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '    @echo "[v55g] Building..."' \
+            '    $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" DESTDIR="$(MODULES_DIR)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -fPIC -I$(STAGING_INC) -I$(STAGING_INC)/libusb-1.0 -I$(AST_HEADERS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-error=format-security -Wno-error" CPPFLAGS="$(TARGET_CPPFLAGS_CLEAN) -I$(STAGING_INC) -I$(STAGING_INC)/libusb-1.0 -I$(AST_HEADERS) -DASTERISK_VERSION_NUM=$(ASTERISK_VERSION_NUM) -DAST_MODULE_SELF_SYM=__internal_asterisk_module_self -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0" LDFLAGS="$(TARGET_LDFLAGS)"' \
+            '    @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
+            '    @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectels.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectels.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectels.so" "$(PKG_BUILD_DIR)/chan_quectels.so"; fi' \
+            '    @if [ -f "$(PKG_BUILD_DIR)/chan_quectels.so" ] && [ ! -f "$(PKG_BUILD_DIR)/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/chan_quectels.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
+            '    @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55g] ERROR: chan_quectel.so NOT built"; echo "[v55g] build dir contents:"; ls -la "$(PKG_BUILD_DIR)"; echo "[v55g] .libs contents:"; ls -la "$(PKG_BUILD_DIR)/.libs" 2>/dev/null || true; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
-            '  $(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
-            '  $(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
+            '    $(INSTALL_DIR) $(1)/usr/lib/asterisk/modules' \
+            '    $(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/' \
             'endef' \
             '' \
             '$(eval $(call BuildPackage,chan_quectel))' > "$MF"
 
-          perl -pi -e 's/^  /\t/' "$MF"
+          perl -pi -e 's/^ {4}/\t/' "$MF"
           sed -i 's/\r$//' "$MF"
 
-          echo "=== Makefile v55a ==="
-          nl -ba "$MF" | sed -n '1,340p'
+          echo "=== Makefile v55g ==="
+          nl -ba "$MF" | sed -n '1,360p'
 
       - name: Enable chan_quectel + final build
         working-directory: ${{ env.SDK_DIR }}
@@ -315,7 +258,20 @@ jobs:
           set -eux
           echo 'CONFIG_PACKAGE_chan_quectel=y' >> .config
           make defconfig
-          make package/feeds/custom/chan_quectel/compile V=s -j"$(nproc)"
+          make package/feeds/custom/chan_quectel/clean V=s || true
+          if ! make package/feeds/custom/chan_quectel/compile V=s -j1; then
+            echo "=== chan_quectel config.log dump ==="
+            find build_dir -path '*/chan_quectel/config.log' -print | while IFS= read -r f; do
+              echo "--- $f ---"
+              sed -n '1,260p' "$f"
+            done || true
+            echo "=== chan_quectel generated Makefile dump ==="
+            find build_dir -path '*/chan_quectel/Makefile' -print | while IFS= read -r f; do
+              echo "--- $f ---"
+              sed -n '1,260p' "$f"
+            done || true
+            exit 1
+          fi
 
       - name: Collect artifacts
         working-directory: ${{ env.SDK_DIR }}
