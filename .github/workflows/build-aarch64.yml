@@ -83,8 +83,8 @@ jobs:
             'CONFIG_PACKAGE_libopenssl=y' \
             'CONFIG_PACKAGE_libiconv-full=y' \
             'CONFIG_PACKAGE_libsqlite3=y' \
-            'CONFIG_PACKAGE_alsa-lib=y' \
-            'CONFIG_PACKAGE_libusb-1.0=y' > .config
+            'CONFIG_PACKAGE_libusb-1.0=y' \
+            'CONFIG_PACKAGE_alsa-lib=y' > .config
           make defconfig
 
       - name: Build Asterisk first (clean + serialize)
@@ -94,7 +94,18 @@ jobs:
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
 
-      - name: Normalize staged Asterisk headers + locate iconv (v55p)
+      - name: Build dependencies (libiconv-full + libsqlite3 + libusb-1.0)
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          set -eux
+          make package/libiconv-full/compile V=s -j1
+          make package/libsqlite3/compile V=s -j1
+          make package/libusb-1.0/compile V=s -j1
+          make package/libiconv-full/install V=s -j1
+          make package/libsqlite3/install V=s -j1
+          make package/libusb-1.0/install V=s -j1
+
+      - name: Normalize staged Asterisk headers + locate iconv (v55r)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -115,7 +126,7 @@ jobs:
             AST_HEADERS="$TARGET_INC"
             AST_INC="$TARGET_INC/asterisk"
           else
-            echo "[v55p] ERROR: no staged Asterisk headers root found"
+            echo "[v55r] ERROR: no staged Asterisk headers root found"
             exit 1
           fi
           for f in \
@@ -129,15 +140,16 @@ jobs:
             fi
           done
           ICONV_HEADERS="${ICONV_HEADER_FILE%/iconv.h}"
-          echo "[v55p] AST_HEADERS=$AST_HEADERS"
-          echo "[v55p] AST_INC=$AST_INC"
-          echo "[v55p] ICONV_HEADERS=$ICONV_HEADERS"
+          echo "[v55r] AST_HEADERS=$AST_HEADERS"
+          echo "[v55r] AST_INC=$AST_INC"
+          echo "[v55r] ICONV_HEADERS=$ICONV_HEADERS"
+          ls -l "$ICONV_HEADERS/include/iconv.h" || echo "[v55r] WARNING: iconv.h not in include subdir"
           test -f "$AST_HEADERS/asterisk.h"
           test -f "$AST_INC/compat.h"
           test -f "$AST_INC/astmm.h"
-          test -f "$ICONV_HEADER_FILE"
+          test -f "$ICONV_HEADER_FILE" || { echo "[v55r] ERROR: iconv.h not staged"; exit 1; }
 
-      - name: Add chan_quectel source (v55p)
+      - name: Add chan_quectel source (v55r)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -146,7 +158,7 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write chan_quectel Makefile (v55p)
+      - name: Write chan_quectel Makefile (v55r)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -156,7 +168,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55p' \
+            'PKG_RELEASE:=v55r' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk libiconv-full libsqlite3 libusb-1.0 alsa-lib' \
             'PKG_FIXUP:=autoreconf' \
@@ -191,18 +203,19 @@ jobs:
             '    CATEGORY:=Network' \
             '    SUBMENU:=Telephony' \
             '    TITLE:=Asterisk channel driver for Quectel LTE modems' \
-            '    DEPENDS:=$(ICONV_DEPENDS) +asterisk +libsqlite3 +libopenssl +alsa-lib +libusb-1.0' \
+            '    DEPENDS:=$(ICONV_DEPENDS) +asterisk +libsqlite3 +libusb-1.0 +alsa-lib' \
             'endef' \
             '' \
             'define Build/Prepare' \
             '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '    @echo "[v55p] Running bootstrap/autoreconf..."' \
+            '    @echo "[v55r] Running bootstrap/autoreconf..."' \
             '    cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             '    @chmod +x $(PKG_BUILD_DIR)/configure' \
-            '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55p] ERROR: configure still missing"; exit 1; }' \
-            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55p] compat.h patched")' \
-            '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55p] astmm.h patched")' \
+            '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55r] ERROR: configure still missing"; exit 1; }' \
+            '    @test -f "$(ICONV_HEADERS)/include/iconv.h" || { echo "[v55r] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/include 2>/dev/null || true; exit 1; }' \
+            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55r] compat.h patched")' \
+            '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55r] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Configure' \
@@ -212,7 +225,7 @@ jobs:
             'define Build/Compile' \
             '    $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -isystem $(TOOLCHAIN_INC)"' \
             '    @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '    @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55p] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '    @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55r] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
