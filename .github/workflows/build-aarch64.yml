@@ -71,7 +71,7 @@ jobs:
           echo "ASTERISK_VER=$AST_VER" >> "$GITHUB_ENV"
           echo "ASTERISK_VERSION_NUM=$ASTERISK_VERSION_NUM" >> "$GITHUB_ENV"
 
-      - name: Minimal .config + disable postgresql (v55v) — гарантированный фикс Autoconf
+      - name: Minimal .config + disable postgresql
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -97,29 +97,33 @@ jobs:
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
 
-      - name: Fix Asterisk menuselect natively (v55v)
+      - name: Fix Asterisk menuselect natively
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
           AST_DIR="feeds/telephony/net/asterisk"
           cd "$AST_DIR"
-          echo "[v55v] Building menuselect natively with host CC=gcc..."
+          echo "[v55x] Building menuselect natively with host CC=gcc..."
           make -C menuselect CC=gcc CXX=g++ AR=ar RANLIB=ranlib LD=gcc STRIP=strip || true
-          echo "[v55v] menuselect fixed"
+          echo "[v55x] menuselect fixed"
 
-      - name: Build dependencies (libiconv-full + libsqlite3 + libusb-1.0)
+      - name: Build dependencies (libiconv + libsqlite3 + libusb-1.0) — гарантированная диагностика v55x
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-          ./scripts/feeds install libiconv-full libsqlite3 libusb-1.0
-          make package/feeds/packages/libs/libiconv-full/compile V=s -j1
+          ./scripts/feeds install libiconv libsqlite3 libusb-1.0
+          echo "=== Checking libiconv package location (v55x) ==="
+          find . -name Makefile -path '*/libiconv/*' | head -1
+          ls -la package/feeds/packages/libs/libiconv/Makefile || echo "WARNING: libiconv Makefile not found"
+          test -f package/feeds/packages/libs/libiconv/Makefile || { echo "ERROR: libiconv Makefile missing"; exit 1; }
+          make package/feeds/packages/libs/libiconv/compile V=s -j1
           make package/feeds/packages/libs/libsqlite3/compile V=s -j1
           make package/feeds/packages/libs/libusb-1.0/compile V=s -j1
-          make package/feeds/packages/libs/libiconv-full/install V=s -j1
+          make package/feeds/packages/libs/libiconv/install V=s -j1
           make package/feeds/packages/libs/libsqlite3/install V=s -j1
           make package/feeds/packages/libs/libusb-1.0/install V=s -j1
 
-      - name: Normalize staged Asterisk headers + locate iconv (v55v)
+      - name: Normalize staged Asterisk headers + locate iconv (v55x)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -140,7 +144,7 @@ jobs:
             AST_HEADERS="$TARGET_INC"
             AST_INC="$TARGET_INC/asterisk"
           else
-            echo "[v55v] ERROR: no staged Asterisk headers root found"
+            echo "[v55x] ERROR: no staged Asterisk headers root found"
             exit 1
           fi
           for f in \
@@ -154,16 +158,16 @@ jobs:
             fi
           done
           ICONV_HEADERS="${ICONV_HEADER_FILE%/iconv.h}"
-          echo "[v55v] AST_HEADERS=$AST_HEADERS"
-          echo "[v55v] AST_INC=$AST_INC"
-          echo "[v55v] ICONV_HEADERS=$ICONV_HEADERS"
-          ls -l "$ICONV_HEADERS/include/iconv.h" || echo "[v55v] WARNING: iconv.h not in include subdir"
+          echo "[v55x] AST_HEADERS=$AST_HEADERS"
+          echo "[v55x] AST_INC=$AST_INC"
+          echo "[v55x] ICONV_HEADERS=$ICONV_HEADERS"
+          ls -l "$ICONV_HEADERS/include/iconv.h" || echo "[v55x] WARNING: iconv.h not in include subdir"
           test -f "$AST_HEADERS/asterisk.h"
           test -f "$AST_INC/compat.h"
           test -f "$AST_INC/astmm.h"
-          test -f "$ICONV_HEADER_FILE" || { echo "[v55v] ERROR: iconv.h not staged"; exit 1; }
+          test -f "$ICONV_HEADER_FILE" || { echo "[v55x] ERROR: iconv.h not staged"; exit 1; }
 
-      - name: Add chan_quectel source (v55v)
+      - name: Add chan_quectel source (v55x)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -172,7 +176,7 @@ jobs:
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
 
-      - name: Write chan_quectel Makefile (v55v)
+      - name: Write chan_quectel Makefile (v55x)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -182,9 +186,9 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55v' \
+            'PKG_RELEASE:=v55x' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
-            'PKG_BUILD_DEPENDS:=asterisk libiconv-full libsqlite3 libusb-1.0 alsa-lib' \
+            'PKG_BUILD_DEPENDS:=asterisk libiconv libsqlite3 libusb-1.0 alsa-lib' \
             'PKG_FIXUP:=autoreconf' \
             'MODULES_DIR:=/usr/lib/asterisk/modules' \
             '' \
@@ -223,13 +227,13 @@ jobs:
             'define Build/Prepare' \
             '    $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             '    $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            '    @echo "[v55v] Running bootstrap/autoreconf..."' \
+            '    @echo "[v55x] Running bootstrap/autoreconf..."' \
             '    cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             '    @chmod +x $(PKG_BUILD_DIR)/configure' \
-            '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55v] ERROR: configure still missing"; exit 1; }' \
-            '    @test -f "$(ICONV_HEADERS)/include/iconv.h" || { echo "[v55v] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/include 2>/dev/null || true; exit 1; }' \
-            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55v] compat.h patched")' \
-            '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55v] astmm.h patched")' \
+            '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55x] ERROR: configure still missing"; exit 1; }' \
+            '    @test -f "$(ICONV_HEADERS)/include/iconv.h" || { echo "[v55x] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/include 2>/dev/null || true; exit 1; }' \
+            '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55x] compat.h patched")' \
+            '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55x] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Configure' \
@@ -239,7 +243,7 @@ jobs:
             'define Build/Compile' \
             '    $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -isystem $(TOOLCHAIN_INC)"' \
             '    @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            '    @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55v] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            '    @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55x] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
