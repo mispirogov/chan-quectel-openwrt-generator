@@ -238,7 +238,7 @@ jobs:
             '    cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             '    @chmod +x $(PKG_BUILD_DIR)/configure' \
             '    @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55cc] ERROR: configure still missing"; exit 1; }' \
-            '    @test -f "$(ICONV_HEADERS)/include/iconv.h" || { echo "[v55cc] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/include 2>/dev/null || true; exit 1; }' \
+            '    @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55cc] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
             '    @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55cc] compat.h patched")' \
             '    @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55cc] astmm.h patched")' \
             'endef' \
