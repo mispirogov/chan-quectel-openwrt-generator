@@ -101,21 +101,24 @@ jobs:
           set -eux
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
-      - name: Build dependencies (libiconv-full + libsqlite3 + libusb-1.0) — v55gg
+      - name: Build dependencies + symlink (libiconv-full + libsqlite3 + libusb-1.0) — v55ii
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
-          ./scripts/feeds install libsqlite3 libusb-1.0
-          echo "=== Checking libiconv-full package location (v55gg) ==="
-          find . -name Makefile -path '*/libiconv-full/*' | head -1
-          ls -la package/libs/libiconv-full/Makefile || echo "WARNING: libiconv-full Makefile not found"
-          test -f package/libs/libiconv-full/Makefile || echo "WARNING: libiconv-full Makefile missing (fallback)"
-          make package/libs/libiconv-full/compile V=s -j1
-          make package/feeds/packages/libs/sqlite3/compile V=s -j1
-          make package/feeds/packages/libs/libusb/compile V=s -j1
-          make package/libs/libiconv-full/install V=s -j1
-          make package/feeds/packages/libs/sqlite3/install V=s -j1
-          make package/feeds/packages/libs/libusb/install V=s -j1
+          ./scripts/feeds install libiconv-full libsqlite3 libusb-1.0
+          ln -sfn feeds/base/package/libs/libiconv-full package/libiconv-full
+          ln -sfn feeds/packages/libs/sqlite3 package/libsqlite3
+          ln -sfn feeds/packages/libs/libusb-1.0 package/libusb-1.0
+          echo "=== Checking dependencies after symlink (v55ii) ==="
+          ls -la package/libiconv-full/Makefile || echo "WARNING: symlink libiconv-full failed"
+          ls -la package/libsqlite3/Makefile || echo "WARNING: symlink libsqlite3 failed"
+          ls -la package/libusb-1.0/Makefile || echo "WARNING: symlink libusb-1.0 failed"
+          make package/libiconv-full/compile V=s -j1
+          make package/libsqlite3/compile V=s -j1
+          make package/libusb-1.0/compile V=s -j1
+          make package/libiconv-full/install V=s -j1
+          make package/libsqlite3/install V=s -j1
+          make package/libusb-1.0/install V=s -j1
       - name: Normalize staged Asterisk headers + locate iconv (v55cc)
         working-directory: ${{ env.SDK_DIR }}
         run: |
@@ -169,7 +172,7 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
-      - name: Write chan_quectel Makefile (v55gg)
+      - name: Write chan_quectel Makefile (v55ii)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -179,7 +182,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55gg' \
+            'PKG_RELEASE:=v55ii' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk libiconv-full libsqlite3 libusb-1.0 alsa-lib' \
             'PKG_FIXUP:=autoreconf' \
@@ -221,13 +224,13 @@ jobs:
             'define Build/Prepare' \
             ' $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             ' $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            ' @echo "[v55gg] Running bootstrap/autoreconf..."' \
+            ' @echo "[v55ii] Running bootstrap/autoreconf..."' \
             ' cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             ' @chmod +x $(PKG_BUILD_DIR)/configure' \
-            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55gg] ERROR: configure still missing"; exit 1; }' \
-            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55gg] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
-            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55gg] compat.h patched")' \
-            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55gg] astmm.h patched")' \
+            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55ii] ERROR: configure still missing"; exit 1; }' \
+            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55ii] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
+            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55ii] compat.h patched")' \
+            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55ii] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Configure' \
@@ -237,7 +240,7 @@ jobs:
             'define Build/Compile' \
             ' $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -isystem $(TOOLCHAIN_INC)"' \
             ' @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55gg] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55ii] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
