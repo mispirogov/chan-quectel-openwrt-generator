@@ -101,7 +101,7 @@ jobs:
           set -eux
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
-      - name: Build dependencies + dynamic symlink (libiconv-full + libsqlite3 + libusb-1.0) — v55vv
+      - name: Build dependencies + dynamic symlink (libiconv-full + libsqlite3 + libusb-1.0) — v55ww
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -110,8 +110,14 @@ jobs:
           rm -rf package/libiconv-full package/sqlite3 package/libusb-1.0
           LIBICONV_FULL_DIR="$(find feeds -type d -name libiconv-full | head -n1)"
           SQLITE3_DIR="$(find feeds -type d -name sqlite3 | head -n1)"
-          LIBUSB_DIR="$(find feeds -type d \( -name libusb-1.0 -o -name libusb \) | head -n1)"
-          echo "=== Dynamic paths (v55vv) ==="
+          LIBUSB_DIR="$(find feeds -type d -name libusb-1.0 | head -n1)"
+          if [ -z "$LIBUSB_DIR" ]; then
+            LIBUSB_DIR="$(find feeds -type d -name libusb | head -n1)"
+          fi
+          if [ -z "$LIBUSB_DIR" ]; then
+            LIBUSB_DIR="$(find feeds -type d -name libusb-compat | head -n1)"
+          fi
+          echo "=== Dynamic paths (v55ww) ==="
           echo "LIBICONV_FULL_DIR=$LIBICONV_FULL_DIR"
           echo "SQLITE3_DIR=$SQLITE3_DIR"
           echo "LIBUSB_DIR=$LIBUSB_DIR"
@@ -124,7 +130,7 @@ jobs:
           ln -sfn "$LIBICONV_FULL_DIR" package/libiconv-full
           ln -sfn "$SQLITE3_DIR" package/sqlite3
           ln -sfn "$LIBUSB_DIR" package/libusb-1.0
-          echo "=== Symlink check (v55vv) ==="
+          echo "=== Symlink check (v55ww) ==="
           readlink -f package/libiconv-full || true
           readlink -f package/sqlite3 || true
           readlink -f package/libusb-1.0 || true
