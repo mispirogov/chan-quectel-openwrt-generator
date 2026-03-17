@@ -15,16 +15,16 @@ jobs:
             build-essential git wget curl rsync \
             libncurses-dev zlib1g-dev gettext python3 unzip xz-utils zstd \
             autoconf automake libtool pkg-config perl
-      - name: Download OpenWrt SDK 24.10.4 (mediatek filogic)
+      - name: Download OpenWrt SDK 24.10.4 (mediatek filogic) — .tar.xz
         run: |
           set -eux
           mkdir -p /tmp/sdk
           cd /tmp/sdk
-          wget -O sdk.tar.zst https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-          tar --use-compress-program=unzstd -xf sdk.tar.zst
+          wget -O sdk.tar.xz https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.xz
+          tar -xf sdk.tar.xz
           SDK_DIR="$(find . -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)"
           echo "SDK_DIR=/tmp/sdk/${SDK_DIR#./}" >> "$GITHUB_ENV"
-      - name: Feeds - GitHub mirrors + telephony + retry update
+      - name: Feeds - GitHub mirrors + telephony BEFORE update
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -101,7 +101,7 @@ jobs:
           set -eux
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
-      - name: Build dependencies + dynamic symlink (libiconv-full + libsqlite3 + libusb-1.0) — v55pp
+      - name: Build dependencies + dynamic symlink (libiconv-full + libsqlite3 + libusb-1.0) — v55tt
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -110,23 +110,26 @@ jobs:
           rm -rf package/libiconv-full package/sqlite3 package/libusb-1.0
           LIBICONV_FULL_DIR="$(find feeds -type d -name libiconv-full | head -n1)"
           SQLITE3_DIR="$(find feeds -type d -name sqlite3 | head -n1)"
-          LIBUSB_DIR="$(find feeds -type d -name libusb-1.0 | head -n1)"
-          echo "=== Dynamic paths (v55pp) ==="
+          LIBUSB_DIR="$(find feeds -type d -path '*/libs/*usb*' | head -n1)"
+          echo "=== Dynamic paths (v55tt) ==="
           echo "LIBICONV_FULL_DIR=$LIBICONV_FULL_DIR"
           echo "SQLITE3_DIR=$SQLITE3_DIR"
           echo "LIBUSB_DIR=$LIBUSB_DIR"
+          echo "All usb-related dirs:"
+          find feeds -type d -name '*usb*' | head -5
+          ls -la feeds/packages/libs/ 2>/dev/null | grep -E 'usb|iconv|sqlite' || true
           test -d "$LIBICONV_FULL_DIR" || { echo "ERROR: libiconv-full source not found"; exit 1; }
           test -d "$SQLITE3_DIR" || { echo "ERROR: sqlite3 source not found"; exit 1; }
-          test -d "$LIBUSB_DIR" || { echo "ERROR: libusb-1.0 source not found"; exit 1; }
+          test -d "$LIBUSB_DIR" || { echo "ERROR: libusb source not found"; exit 1; }
           ln -sfn "$LIBICONV_FULL_DIR" package/libiconv-full
           ln -sfn "$SQLITE3_DIR" package/sqlite3
           ln -sfn "$LIBUSB_DIR" package/libusb-1.0
-          ls -la package/libiconv-full/Makefile || echo "WARNING: symlink libiconv-full still missing"
-          ls -la package/sqlite3/Makefile || echo "WARNING: symlink sqlite3 still missing"
-          ls -la package/libusb-1.0/Makefile || echo "WARNING: symlink libusb-1.0 still missing"
-          test -f package/libiconv-full/Makefile || { echo "ERROR: libiconv-full symlink missing after dynamic ln"; exit 1; }
-          test -f package/sqlite3/Makefile || { echo "ERROR: sqlite3 symlink missing after dynamic ln"; exit 1; }
-          test -f package/libusb-1.0/Makefile || { echo "ERROR: libusb-1.0 symlink missing after dynamic ln"; exit 1; }
+          ls -la package/libiconv-full/Makefile || echo "WARNING: symlink libiconv-full missing"
+          ls -la package/sqlite3/Makefile || echo "WARNING: symlink sqlite3 missing"
+          ls -la package/libusb-1.0/Makefile || echo "WARNING: symlink libusb-1.0 missing"
+          test -f package/libiconv-full/Makefile || { echo "ERROR: libiconv-full symlink missing"; exit 1; }
+          test -f package/sqlite3/Makefile || { echo "ERROR: sqlite3 symlink missing"; exit 1; }
+          test -f package/libusb-1.0/Makefile || { echo "ERROR: libusb-1.0 symlink missing"; exit 1; }
           make package/libiconv-full/clean V=s || true
           make package/sqlite3/clean V=s || true
           make package/libusb-1.0/clean V=s || true
@@ -190,7 +193,7 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
-      - name: Write chan_quectel Makefile (v55pp)
+      - name: Write chan_quectel Makefile (v55tt)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -200,7 +203,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55pp' \
+            'PKG_RELEASE:=v55tt' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk libiconv-full libsqlite3 libusb-1.0 alsa-lib' \
             'PKG_FIXUP:=autoreconf' \
@@ -242,13 +245,13 @@ jobs:
             'define Build/Prepare' \
             ' $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             ' $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            ' @echo "[v55pp] Running bootstrap/autoreconf..."' \
+            ' @echo "[v55tt] Running bootstrap/autoreconf..."' \
             ' cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             ' @chmod +x $(PKG_BUILD_DIR)/configure' \
-            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55pp] ERROR: configure still missing"; exit 1; }' \
-            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55pp] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
-            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55pp] compat.h patched")' \
-            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55pp] astmm.h patched")' \
+            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55tt] ERROR: configure still missing"; exit 1; }' \
+            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55tt] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
+            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55tt] compat.h patched")' \
+            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55tt] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Configure' \
@@ -258,7 +261,7 @@ jobs:
             'define Build/Compile' \
             ' $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -isystem $(TOOLCHAIN_INC)"' \
             ' @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55pp] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55tt] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
