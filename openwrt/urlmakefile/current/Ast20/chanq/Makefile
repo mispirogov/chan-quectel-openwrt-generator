@@ -1,3 +1,7 @@
+# Copyright (C) 2017 - 2018 OpenWrt.org
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=asterisk-chan-quectel
@@ -6,13 +10,14 @@ PKG_RELEASE:=1
 
 PKG_SOURCE:=master.zip
 PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel/archive/refs/heads/
-PKG_CAT:=unzip
 PKG_HASH:=skip
 
+PKG_FIXUP:=autoreconf
 PKG_LICENSE:=GPL-2.0
 PKG_LICENSE_FILES:=COPYRIGHT.txt LICENSE.txt
+PKG_MAINTAINER:=Jiri Slachta
 
-PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+MODULES_DIR:=/usr/lib/asterisk/modules
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/nls.mk
@@ -21,23 +26,52 @@ define Package/$(PKG_NAME)
   SUBMENU:=Telephony
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Asterisk Mobile Telephony Module
-  DEPENDS:=+asterisk20 $(ICONV_DEPENDS) +kmod-usb-acm +kmod-usb-serial +kmod-usb-serial-option +libusb-1.0 +alsa-lib
+  URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
+  TITLE:=Asterisk chan_quectel (EC25 voice, UAC)
+
+  # Главное: для UAC добавляем usb-audio, плюс usb-modeswitch (часто нужен для модемов)
+  DEPENDS:=+asterisk $(ICONV_DEPENDS) \
+    +kmod-usb-acm +kmod-usb-serial +kmod-usb-serial-option \
+    +kmod-usb-audio +usb-modeswitch \
+    +libusb-1.0 +alsa-lib
 endef
 
 define Package/$(PKG_NAME)/description
- Asterisk channel driver for mobile telephony.
+Asterisk channel driver for Quectel/Simcom modems, including UAC USB-audio mode.
 endef
+
+# В OpenWrt 24.10.x пакет asterisk — это Asterisk 20.8.1. citeturn13view0
+CONFIGURE_ARGS+= \
+  --with-asterisk=$(STAGING_DIR)/usr/include \
+  --with-astversion=20
+
+ifeq ($(CONFIG_BUILD_NLS),y)
+  CONFIGURE_ARGS+=--with-iconv=$(ICONV_PREFIX)/include
+else
+  CONFIGURE_ARGS+=--with-iconv=$(TOOLCHAIN_DIR)/include
+endif
+
+MAKE_FLAGS+=LD="$(TARGET_CC)"
+
+CONFIGURE_VARS += \
+  DESTDIR="$(MODULES_DIR)" \
+  ac_cv_type_size_t=yes \
+  ac_cv_type_ssize_t=yes
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
 endef
 
+define Package/$(PKG_NAME)/conffiles
+/etc/asterisk/quectel.conf
+endef
+
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/etc/asterisk
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/etc/quectel.conf $(1)/etc/asterisk
-	$(INSTALL_DIR) $(1)/usr/lib/asterisk/modules
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)/usr/lib/asterisk/modules/
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/etc/quectel.conf $(1)/etc/asterisk/quectel.conf
+
+	$(INSTALL_DIR) $(1)$(MODULES_DIR)
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/chan_quectel.so $(1)$(MODULES_DIR)
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
