@@ -111,14 +111,14 @@ jobs:
           mkdir -p package
           rm -rf package/libiconv-full package/sqlite3 package/libusb-1.0
           echo "===!!!=== FIND START ===!!!==="
-          LIBICONV_FULL_DIR="$(find feeds -name Makefile -path '*/libiconv-full/*' | head -n1 | xargs dirname)"
-          SQLITE3_DIR="$(find feeds -name Makefile -path '*/sqlite3/*' | head -n1 | xargs dirname)"
-          LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-1.0/*' | head -n1)"
+          LIBICONV_FULL_DIR="$(find feeds -name Makefile -path '*/libiconv-full/Makefile' | head -n1 | xargs dirname)"
+          SQLITE3_DIR="$(find feeds -name Makefile -path '*/sqlite3/Makefile' | head -n1 | xargs dirname)"
+          LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-1.0/Makefile' | head -n1)"
           if [ -z "$LIBUSB_MAKE" ]; then
-            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb/*' | head -n1)"
+            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb/Makefile' | head -n1)"
           fi
           if [ -z "$LIBUSB_MAKE" ]; then
-            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-compat/*' | head -n1)"
+            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-compat/Makefile' | head -n1)"
           fi
           LIBUSB_DIR="$(echo "$LIBUSB_MAKE" | xargs dirname)"
           echo "LIBICONV_FULL_DIR=$LIBICONV_FULL_DIR"
