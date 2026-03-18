@@ -101,7 +101,7 @@ jobs:
           set -eux
           make package/asterisk/clean V=s || true
           make package/asterisk/compile V=s -j1
-      - name: Build dependencies + Makefile-search symlink — v55xx
+      - name: Build dependencies + Makefile-search symlink — v55yy
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -113,13 +113,14 @@ jobs:
           echo "===!!!=== FIND START ===!!!==="
           LIBICONV_FULL_DIR="$(find feeds -name Makefile -path '*/libiconv-full/*' | head -n1 | xargs dirname)"
           SQLITE3_DIR="$(find feeds -name Makefile -path '*/sqlite3/*' | head -n1 | xargs dirname)"
-          LIBUSB_DIR="$(find feeds -name Makefile -path '*/libusb-1.0/*' | head -n1 | xargs dirname)"
-          if [ -z "$LIBUSB_DIR" ]; then
-            LIBUSB_DIR="$(find feeds -name Makefile -path '*/libusb/*' | head -n1 | xargs dirname)"
+          LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-1.0/*' | head -n1)"
+          if [ -z "$LIBUSB_MAKE" ]; then
+            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb/*' | head -n1)"
           fi
-          if [ -z "$LIBUSB_DIR" ]; then
-            LIBUSB_DIR="$(find feeds -name Makefile -path '*/libusb-compat/*' | head -n1 | xargs dirname)"
+          if [ -z "$LIBUSB_MAKE" ]; then
+            LIBUSB_MAKE="$(find feeds -name Makefile -path '*/libusb-compat/*' | head -n1)"
           fi
+          LIBUSB_DIR="$(echo "$LIBUSB_MAKE" | xargs dirname)"
           echo "LIBICONV_FULL_DIR=$LIBICONV_FULL_DIR"
           echo "SQLITE3_DIR=$SQLITE3_DIR"
           echo "LIBUSB_DIR=$LIBUSB_DIR"
@@ -205,7 +206,7 @@ jobs:
           mkdir -p package/feeds/custom/chan_quectel/src
           git clone --depth 1 https://github.com/IchthysMaranatha/asterisk-chan-quectel.git /tmp/chan
           rsync -a --delete /tmp/chan/ package/feeds/custom/chan_quectel/src/
-      - name: Write chan_quectel Makefile (v55xx)
+      - name: Write chan_quectel Makefile (v55yy)
         working-directory: ${{ env.SDK_DIR }}
         run: |
           set -eux
@@ -215,7 +216,7 @@ jobs:
             '' \
             'PKG_NAME:=chan_quectel' \
             'PKG_VERSION:=git' \
-            'PKG_RELEASE:=v55xx' \
+            'PKG_RELEASE:=v55yy' \
             'PKG_BUILD_DIR:=$(BUILD_DIR)/chan_quectel' \
             'PKG_BUILD_DEPENDS:=asterisk libiconv-full libsqlite3 libusb-1.0 alsa-lib' \
             'PKG_FIXUP:=autoreconf' \
@@ -257,13 +258,13 @@ jobs:
             'define Build/Prepare' \
             ' $(INSTALL_DIR) $(PKG_BUILD_DIR)' \
             ' $(CP) ./src/* $(PKG_BUILD_DIR)/' \
-            ' @echo "[v55xx] Running bootstrap/autoreconf..."' \
+            ' @echo "[v55yy] Running bootstrap/autoreconf..."' \
             ' cd $(PKG_BUILD_DIR) && chmod +x bootstrap && ./bootstrap || autoreconf -fi' \
             ' @chmod +x $(PKG_BUILD_DIR)/configure' \
-            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55xx] ERROR: configure still missing"; exit 1; }' \
-            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55xx] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
-            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55xx] compat.h patched")' \
-            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55xx] astmm.h patched")' \
+            ' @test -f "$(PKG_BUILD_DIR)/configure" || { echo "[v55yy] ERROR: configure still missing"; exit 1; }' \
+            ' @test -f "$(ICONV_HEADERS)/iconv.h" || { echo "[v55yy] ERROR: iconv.h not staged"; ls -l $(ICONV_HEADERS)/iconv.h 2>/dev/null || true; exit 1; }' \
+            ' @grep -q "<pthread.h>" "$(AST_INC)/compat.h" || (sed -i "/^#include <unistd.h>/a#include <pthread.h>" "$(AST_INC)/compat.h" && echo "[v55yy] compat.h patched")' \
+            ' @grep -Eq "^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_IGNORE" "$(AST_INC)/astmm.h" || (sed -i -E "s@^#define[[:space:]]+ASTMM_LIBC[[:space:]]+ASTMM_BLOCK.*@#define ASTMM_LIBC ASTMM_IGNORE /* OPENWRT_MUSL_ASTMM */@" "$(AST_INC)/astmm.h" && echo "[v55yy] astmm.h patched")' \
             'endef' \
             '' \
             'define Build/Configure' \
@@ -273,7 +274,7 @@ jobs:
             'define Build/Compile' \
             ' $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" AR="$(TARGET_AR)" LD="$(TARGET_CC)" STRIP="$(TARGET_STRIP)" CFLAGS="$(TARGET_CFLAGS_CLEAN) -isystem $(TOOLCHAIN_INC)"' \
             ' @if [ -f "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" ]; then cp "$(PKG_BUILD_DIR)/.libs/chan_quectel.so" "$(PKG_BUILD_DIR)/chan_quectel.so"; fi' \
-            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55xx] ERROR: chan_quectel.so NOT built"; exit 1; }' \
+            ' @test -f "$(PKG_BUILD_DIR)/chan_quectel.so" || { echo "[v55yy] ERROR: chan_quectel.so NOT built"; exit 1; }' \
             'endef' \
             '' \
             'define Package/chan_quectel/install' \
