@@ -1,12 +1,6 @@
-# Минимальный .config слой для сборки Asterisk + вашего модуля
-# (генератор делает: cat addpkg >> .config). Source: original generator workflow. 
-# https://raw.githubusercontent.com/IchthysMaranatha/chan-quectel-openwrt-generator/main/.github/workflows/main.yml
-
 CONFIG_PACKAGE_asterisk=m
 CONFIG_PACKAGE_libsqlite3=m
 CONFIG_PACKAGE_libopenssl=m
 CONFIG_PACKAGE_alsa-lib=m
 CONFIG_PACKAGE_libusb-1.0=m
-
-# ВАЖНО: новое имя пакета
 CONFIG_PACKAGE_asterisk20-chan-quectel=m
