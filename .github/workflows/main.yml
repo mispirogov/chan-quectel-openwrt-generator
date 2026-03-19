@@ -64,7 +64,7 @@ jobs:
           set -eux
           test -f wrtsdk/package/libs/openssl/Makefile
 
-      - name: Write pinned feeds.conf (IMPORTANT: relative src-link path!)
+      - name: Write pinned feeds.conf IMPORTANT relative src-link path!
         run: |
           set -eux
           cat > wrtsdk/feeds.conf <<EOF
