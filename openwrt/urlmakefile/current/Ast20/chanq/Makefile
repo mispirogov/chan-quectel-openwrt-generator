@@ -1,14 +1,10 @@
-# Copyright (C) 2017 - 2018 OpenWrt.org
-# This is free software, licensed under the GNU General Public License v2.
-# See /LICENSE for more information.
-
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=asterisk-chan-quectel
 PKG_VERSION:=master
 PKG_RELEASE:=1
 
-PKG_SOURCE:=master.zip
+PKG_SOURCE:=$(PKG_VERSION).zip
 PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel/archive/refs/heads/
 PKG_HASH:=skip
 
@@ -27,20 +23,20 @@ define Package/$(PKG_NAME)
   SECTION:=net
   CATEGORY:=Network
   URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
-  TITLE:=Asterisk chan_quectel (EC25 voice, UAC)
+  TITLE:=Asterisk chan_quectel (EC25 voice + UAC)
 
-  # Главное: для UAC добавляем usb-audio, плюс usb-modeswitch (часто нужен для модемов)
-  DEPENDS:=+asterisk $(ICONV_DEPENDS) \
+  # как минимум asterisk + iconv deps и USB/ALSA зависимости
+  # Asterisk в OpenWrt 24.10.x — 20.8.1 и сам тянет libopenssl/libsqlite3 и др. citeturn11view0
+  DEPENDS:=asterisk $(ICONV_DEPENDS) \
     +kmod-usb-acm +kmod-usb-serial +kmod-usb-serial-option \
     +kmod-usb-audio +usb-modeswitch \
     +libusb-1.0 +alsa-lib
 endef
 
 define Package/$(PKG_NAME)/description
-Asterisk channel driver for Quectel/Simcom modems, including UAC USB-audio mode.
+Asterisk channel driver for Quectel/Simcom modems. For EC25 can work with UAC USB-audio.
 endef
 
-# В OpenWrt 24.10.x пакет asterisk — это Asterisk 20.8.1. citeturn13view0
 CONFIGURE_ARGS+= \
   --with-asterisk=$(STAGING_DIR)/usr/include \
   --with-astversion=20
@@ -52,12 +48,12 @@ else
 endif
 
 MAKE_FLAGS+=LD="$(TARGET_CC)"
-
 CONFIGURE_VARS += \
   DESTDIR="$(MODULES_DIR)" \
   ac_cv_type_size_t=yes \
   ac_cv_type_ssize_t=yes
 
+# КЛЮЧ: стандартная подготовка исходников из архива
 define Build/Prepare
 	$(call Build/Prepare/Default)
 endef

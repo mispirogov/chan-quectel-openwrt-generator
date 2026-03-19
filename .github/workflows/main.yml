@@ -5,57 +5,84 @@ on:
     inputs:
       sdkurl:
         required: true
-        description: Download url for Openwrt sdk file in tar.xz or tar.zst format
+        description: Download url for OpenWrt SDK file (.tar.xz or .tar.zst)
       astversion:
         type: choice
-        description: Choose Asterisk version - make sure it corresponds with Openwrt version chosen
-        options: 
-        - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast20
-        - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast18
-        - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/ast16 
+        description: Choose Asterisk version directory (must match OpenWrt version)
+        options:
+          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast20
+          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast18
+          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/ast16
+
 env:
-  exten: ${{ endsWith( github.event.inputs.sdkurl , 'zst' ) && '.tar.zst' || '.tar.xz'}}
-  zsad: ${{ endsWith( github.event.inputs.sdkurl , 'zst' ) && '--zstd' || ''}}
+  exten: ${{ endsWith(github.event.inputs.sdkurl, 'zst') && '.tar.zst' || '.tar.xz' }}
+  zsad:  ${{ endsWith(github.event.inputs.sdkurl, 'zst') && '--zstd' || '' }}
+
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
+
       - uses: KyoriPowered/action-regex-match@v4
         id: regex-match
         with:
           text: ${{ github.event.inputs.sdkurl }}
-          regex: '^.+openwrt-sdk-([\d]*).*?-([a-z,0-9]*)-.+$'        
+          regex: '^.+openwrt-sdk-([\d]*).*?-([a-z,0-9]*)-.+$'
+
       - name: set env variable
         run: echo "ver=$(basename ${{ github.event.inputs.astversion }})" >> $GITHUB_ENV
-      - name: Generate ipk
+
+      - name: Generate ipk (compile ONLY chanq + save build.log)
+        shell: bash
         run: |
-          env
-          echo ${{ steps.regex-match.outputs.group1 }}
-          sudo apt update
-          sudo apt install -y libncurses5-dev libncursesw5-dev zlib1g-dev gawk gettext libssl-dev xsltproc rsync unzip python-is-python3
-          wget -q ${{ github.event.inputs.sdkurl }}
-          tar ${{ env.zsad }} -xf $(basename ${{ github.event.inputs.sdkurl }})
-          mv $(basename ${{ github.event.inputs.sdkurl }} ${{ env.exten }}) wrtsdk          
+          set -euxo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libncurses5-dev libncursesw5-dev zlib1g-dev gawk gettext libssl-dev \
+            xsltproc rsync unzip python-is-python3 wget file
+
+          wget -q "${{ github.event.inputs.sdkurl }}"
+
+          tar ${{ env.zsad }} -xf "$(basename "${{ github.event.inputs.sdkurl }}")"
+          mv "$(basename "${{ github.event.inputs.sdkurl }}" "${{ env.exten }}")" wrtsdk
+
+          # feeds: local custom feed + дефолтные feeds из SDK (как в оригинале генератора)
           echo "src-link cusrepo ${{ github.event.inputs.astversion }}" > wrtsdk/feeds.conf
-          export pkgdir=${{ github.event.inputs.astversion }}
           cd wrtsdk
+
+          # Оригинальная логика генератора: добавляет feeds.conf.default без luci/routing/freifunk
           sed -E '\`luci|routing|freifunk`d' feeds.conf.default >> feeds.conf
+
           ./scripts/feeds update -a
           ./scripts/feeds install asterisk-chan-quectel
-          sed -z -i 's/default ALL/default n/' Config.in
-          sed -z -i 's/default ALL/default n/' Config.in
-          sed -z -i 's/default y/default n/' Config.in
-          sed -z -i 's/default y/default n/' Config.in
-          make defconfig
-          cat $pkgdir/addpkg >> .config
-          make -j4 V=s
-          cd ..
-          mkdir downloads
-          cp $(find $(pwd)/wrtsdk/bin/ -wholename *cusrepo/*.ipk) downloads/
+
+          # ВАЖНО: не строим world. Собираем только пакет chanq.
+          # Для диагностики: -j1 и V=sc (сам OpenWrt рекомендует -j1 V=s/V=sc для понимания причины падения). citeturn13view0
+          ( time make -j1 V=sc package/feeds/cusrepo/chanq/compile ) 2>&1 | tee ../build.log
+
+      - name: Collect artifacts (ipk + logs)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p downloads
+
+          # ipk (если собрался)
+          find "$(pwd)/wrtsdk/bin" -type f -name "*.ipk" -path "*cusrepo*" -print -exec cp -v {} downloads/ \; || true
+
+          # логи и конфиг — всегда
+          cp -v build.log downloads/ || true
+          cp -v wrtsdk/.config downloads/ || true
+
+          echo "---- ERROR lines (if any) ----" || true
+          grep -nE "ERROR: package/|failed to build|\\*\\*\\*" build.log | tail -n 200 || true
+
       - name: Upload Artifact GitHub Action
+        if: always()
         uses: actions/upload-artifact@v4
-        with: 
-          name: chan-quectel-openwrt${{ steps.regex-match.outputs.group1 }}-${{ steps.regex-match.outputs.group2 }}
+        with:
+          name: chan-quectel-openwrt${{ steps.regex-match.outputs.group1 }}-${{ steps.regex-match.outputs.group2 }}-with-logs
           path: downloads
