@@ -1,15 +1,18 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=asterisk20-chan-quectel
-PKG_VERSION:=2025.03.24~3d45c7f0
+PKG_VERSION:=2025.03.24
 PKG_RELEASE:=1
 
+# Pinned upstream source (commit known; patch link):
+# https://github.com/IchthysMaranatha/asterisk-chan-quectel/commit/3d45c7f072131296a7e3c1a4faf5bb18751dbd87.patch
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
 PKG_SOURCE_VERSION:=3d45c7f072131296a7e3c1a4faf5bb18751dbd87
 PKG_SOURCE_DATE:=2025-03-24
 
 PKG_FIXUP:=autoreconf
+
 PKG_LICENSE:=GPL-2.0
 PKG_LICENSE_FILES:=COPYRIGHT.txt LICENSE.txt
 
@@ -22,26 +25,30 @@ define Package/$(PKG_NAME)
   SUBMENU:=Telephony
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Asterisk 20 channel driver for Quectel EC25
+  TITLE:=Asterisk 20 chan_quectel for Quectel EC25 (UAC)
   URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
-  DEPENDS:=+asterisk +libsqlite3 +alsa-lib +libusb-1.0 +usb-modeswitch +kmod-usb-audio +kmod-usb-acm +kmod-usb-serial-option
+
+  # Требуемые зависимости (как вы просили):
+  # asterisk, alsa-lib, kmod-usb-audio, kmod-usb-acm, kmod-usb-serial-option, libusb-1.0, usb-modeswitch, libsqlite3
+  DEPENDS:=+asterisk +alsa-lib +libusb-1.0 +usb-modeswitch +libsqlite3 \
+    +kmod-usb-audio +kmod-usb-acm +kmod-usb-serial-option
 endef
 
 define Package/$(PKG_NAME)/description
-Asterisk channel driver for Quectel modems.
+Asterisk channel driver for Quectel modules (EC25). Intended for voice; supports UAC mode (USB sound card).
 endef
 
-CONFIGURE_ARGS += \
+CONFIGURE_ARGS+= \
   --with-asterisk=$(STAGING_DIR)/usr/include \
   --with-astversion=20
 
 ifeq ($(CONFIG_BUILD_NLS),y)
-  CONFIGURE_ARGS += --with-iconv=$(ICONV_PREFIX)/include
+  CONFIGURE_ARGS+=--with-iconv=$(ICONV_PREFIX)/include
 else
-  CONFIGURE_ARGS += --with-iconv=$(TOOLCHAIN_DIR)/include
+  CONFIGURE_ARGS+=--with-iconv=$(TOOLCHAIN_DIR)/include
 endif
 
-MAKE_FLAGS += LD="$(TARGET_CC)"
+MAKE_FLAGS+=LD="$(TARGET_CC)"
 
 CONFIGURE_VARS += \
   DESTDIR="$(MODULES_DIR)" \
