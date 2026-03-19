@@ -1,88 +1,149 @@
-name: BuildIpk
+# Источники (приоритетные):
+# OpenWrt SDK 24.10.4 filogic directory: https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/
+# feeds.buildinfo (pinned commits):      https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/feeds.buildinfo
+# version.buildinfo (build-id):          https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/version.buildinfo
+
+name: BuildIpk-OpenWrt-24.10.4-filogic-Ast20-chan-quectel-HARDCODED
 
 on:
-  workflow_dispatch:
-    inputs:
-      sdkurl:
-        required: true
-        description: Download url for OpenWrt SDK file (.tar.xz or .tar.zst)
-      astversion:
-        type: choice
-        description: Choose Asterisk version directory (must match OpenWrt version)
-        options:
-          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast20
-          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/Ast18
-          - $GITHUB_WORKSPACE/openwrt/urlmakefile/current/ast16
+  workflow_dispatch: {}
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/main.yml"
+      - "openwrt/urlmakefile/current/Ast20/chanq/Makefile"
+      - "openwrt/urlmakefile/current/Ast20/addpkg"
 
-env:
-  exten: ${{ endsWith(github.event.inputs.sdkurl, 'zst') && '.tar.zst' || '.tar.xz' }}
-  zsad:  ${{ endsWith(github.event.inputs.sdkurl, 'zst') && '--zstd' || '' }}
+concurrency:
+  group: openwrt-24.10.4-filogic-chanq-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    # Генератор исходно использует ubuntu-22.04. Оставляем для воспроизводимости окружения. citeturn2view1
     runs-on: ubuntu-22.04
+    timeout-minutes: 330  # лимит GitHub-hosted job = 6 часов. citeturn7search0
+
+    env:
+      OWRT_VERSION: "24.10.4"
+      OWRT_TARGET: "mediatek/filogic"
+      OWRT_ARCH: "aarch64_cortex-a53"
+
+      SDK_URL: "https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+      SDK_SHA256: "b9762b8e1c8e114b0e6a252b98e94e6e4a1d2496beb9f6044c26227a8d78dee0"
+      SDK_DIRNAME: "openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64"
+
+      CUSREPO_DIR: "${{ github.workspace }}/openwrt/urlmakefile/current/Ast20"
+      MAKE_TARGET: "package/feeds/cusrepo/chanq/compile"
+
+      CCACHE_DIR: "${{ github.workspace }}/.ccache"
 
     steps:
-      - name: Check out repository code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: KyoriPowered/action-regex-match@v4
-        id: regex-match
+      - name: Host dependencies
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates wget curl git \
+            build-essential gawk gettext file rsync \
+            unzip python-is-python3 \
+            zstd ccache
+
+      - name: Cache (dl + ccache)
+        uses: actions/cache@v4
         with:
-          text: ${{ github.event.inputs.sdkurl }}
-          regex: '^.+openwrt-sdk-([\d]*).*?-([a-z,0-9]*)-.+$'
+          # Важно держать кэш маленьким: по умолчанию лимит cache storage ~10GB на repo. citeturn7search2turn7search16
+          path: |
+            .ccache
+            wrtsdk/dl
+          key: >
+            ${{ runner.os }}-owrt-${{ env.OWRT_VERSION }}-filogic-
+            ${{ hashFiles('openwrt/urlmakefile/current/Ast20/chanq/Makefile') }}-
+            ${{ hashFiles('openwrt/urlmakefile/current/Ast20/addpkg') }}
 
-      - name: set env variable
-        run: echo "ver=$(basename ${{ github.event.inputs.astversion }})" >> $GITHUB_ENV
+      - name: Download SDK (pinned) + verify sha256
+        run: |
+          set -eux
+          wget -O sdk.tar.zst "${SDK_URL}"
+          echo "${SDK_SHA256}  sdk.tar.zst" | sha256sum -c -
 
-      - name: Generate ipk (compile ONLY chanq + save build.log)
+      - name: Extract SDK
+        run: |
+          set -eux
+          tar --use-compress-program=unzstd -xf sdk.tar.zst
+          mv "${SDK_DIRNAME}" wrtsdk
+          rm -f sdk.tar.zst
+
+      - name: Write pinned feeds.conf (release pinned commits) + update/install feeds
+        run: |
+          set -eux
+          # pinned commits прямо из feeds.buildinfo для filogic 24.10.4 citeturn8view0
+          cat > wrtsdk/feeds.conf <<'EOF'
+          src-link cusrepo ${GITHUB_WORKSPACE}/openwrt/urlmakefile/current/Ast20
+          src-git packages https://github.com/openwrt/packages.git^f1470815f41fe199bfdafe9a91ad115bc2e91203
+          src-git luci https://github.com/openwrt/luci.git^75e41cba5160281b2d1dca922719efef29f7ffd8
+          src-git routing https://github.com/openwrt/routing.git^3eb59e9471858c83891979793f1dd29cca156919
+          src-git telephony https://github.com/openwrt/telephony.git^2a4541d46199ac96fac214d02c908402831c4dc6
+          EOF
+
+          cd wrtsdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure (.config) + enable ccache + append hardcoded package config
+        run: |
+          set -eux
+          cd wrtsdk
+
+          # Базовый defconfig
+          make defconfig
+
+          # ccache
+          echo "CONFIG_CCACHE=y" >> .config
+
+          # Пакетные опции (в т.ч. asterisk + sqlite/openssl/alsa и т.д.),
+          # файл хранится в репозитории: openwrt/urlmakefile/current/Ast20/addpkg
+          cat "${CUSREPO_DIR}/addpkg" >> .config
+
+          make defconfig
+
+      - name: Build ONLY chanq (no world) + capture build.log
         shell: bash
         run: |
           set -euxo pipefail
+          export CCACHE_DIR="${CCACHE_DIR}"
+          export CCACHE_COMPRESS=1
+          export CCACHE_MAXSIZE=1G
 
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libncurses5-dev libncursesw5-dev zlib1g-dev gawk gettext libssl-dev \
-            xsltproc rsync unzip python-is-python3 wget file
-
-          wget -q "${{ github.event.inputs.sdkurl }}"
-
-          tar ${{ env.zsad }} -xf "$(basename "${{ github.event.inputs.sdkurl }}")"
-          mv "$(basename "${{ github.event.inputs.sdkurl }}" "${{ env.exten }}")" wrtsdk
-
-          # feeds: local custom feed + дефолтные feeds из SDK (как в оригинале генератора)
-          echo "src-link cusrepo ${{ github.event.inputs.astversion }}" > wrtsdk/feeds.conf
           cd wrtsdk
 
-          # Оригинальная логика генератора: добавляет feeds.conf.default без luci/routing/freifunk
-          sed -E '\`luci|routing|freifunk`d' feeds.conf.default >> feeds.conf
+          # Ключевая цель из вашего требования:
+          # make package/feeds/cusrepo/chanq/compile V=sc -j1
+          ( time make -j1 V=sc ${MAKE_TARGET} ) 2>&1 | tee ../build.log
 
-          ./scripts/feeds update -a
-          ./scripts/feeds install asterisk-chan-quectel
-
-          # ВАЖНО: не строим world. Собираем только пакет chanq.
-          # Для диагностики: -j1 и V=sc (сам OpenWrt рекомендует -j1 V=s/V=sc для понимания причины падения). citeturn13view0
-          ( time make -j1 V=sc package/feeds/cusrepo/chanq/compile ) 2>&1 | tee ../build.log
-
-      - name: Collect artifacts (ipk + logs)
+      - name: Collect artifacts (ipk + build.log + .config + feeds.conf)
         if: always()
         shell: bash
         run: |
+          set -eux
           mkdir -p downloads
 
-          # ipk (если собрался)
-          find "$(pwd)/wrtsdk/bin" -type f -name "*.ipk" -path "*cusrepo*" -print -exec cp -v {} downloads/ \; || true
-
-          # логи и конфиг — всегда
           cp -v build.log downloads/ || true
           cp -v wrtsdk/.config downloads/ || true
+          cp -v wrtsdk/feeds.conf downloads/ || true
 
-          echo "---- ERROR lines (if any) ----" || true
-          grep -nE "ERROR: package/|failed to build|\\*\\*\\*" build.log | tail -n 200 || true
+          # .ipk пакеты вашего кастомного feed (cusrepo)
+          find wrtsdk/bin/packages -type f -name '*.ipk' -path '*cusrepo*' -print -exec cp -v {} downloads/ \; || true
 
-      - name: Upload Artifact GitHub Action
+          echo "---- QUICK ERROR SUMMARY (tail) ----" || true
+          grep -nE 'ERROR: package/|failed to build|No targets specified and no makefile found|undefined reference|collect2: error|fatal error:' build.log | tail -n 200 || true
+
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: chan-quectel-openwrt${{ steps.regex-match.outputs.group1 }}-${{ steps.regex-match.outputs.group2 }}-with-logs
+          name: asterisk20-chan-quectel_openwrt-${{ env.OWRT_VERSION }}_${{ env.OWRT_TARGET }}_${{ env.OWRT_ARCH }}
           path: downloads
