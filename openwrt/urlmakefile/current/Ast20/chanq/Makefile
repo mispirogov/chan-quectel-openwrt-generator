@@ -4,8 +4,6 @@ PKG_NAME:=asterisk20-chan-quectel
 PKG_VERSION:=2025.03.24
 PKG_RELEASE:=1
 
-# Pinned upstream commit (fixed point):
-# https://github.com/IchthysMaranatha/asterisk-chan-quectel/commit/3d45c7f072131296a7e3c1a4faf5bb18751dbd87.patch
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
 PKG_SOURCE_VERSION:=3d45c7f072131296a7e3c1a4faf5bb18751dbd87
@@ -26,14 +24,11 @@ define Package/$(PKG_NAME)
   CATEGORY:=Network
   TITLE:=Asterisk 20 chan_quectel for Quectel EC25 (UAC)
   URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
-
-  # Runtime deps requested
-  DEPENDS:=+asterisk +alsa-lib +libusb-1.0 +usb-modeswitch +libsqlite3 \
-    +kmod-usb-audio +kmod-usb-acm +kmod-usb-serial-option
+  DEPENDS:=+asterisk +alsa-lib +kmod-usb-audio +kmod-usb-acm +kmod-usb-serial-option +libusb-1.0 +usb-modeswitch +libsqlite3
 endef
 
 define Package/$(PKG_NAME)/description
-Asterisk channel driver for Quectel modems (EC25 series), voice via USB/UAC possible.
+Asterisk channel driver for Quectel (EC25). Supports UAC (USB sound card) mode.
 endef
 
 CONFIGURE_ARGS+= \
@@ -53,7 +48,6 @@ CONFIGURE_VARS += \
   ac_cv_type_size_t=yes \
   ac_cv_type_ssize_t=yes
 
-# CRITICAL: use default prepare (unpack/patch/etc), like in openwrt/telephony asterisk-chan-dongle.
 define Build/Prepare
 	$(call Build/Prepare/Default)
 endef
