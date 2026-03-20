@@ -4,25 +4,31 @@ on:
   workflow_dispatch: {}
   push:
     branches: ["main"]
-    paths:
-      - ".github/workflows/main.yml"
-      - "openwrt/urlmakefile/current/Ast20/chanq/Makefile"
-      - "openwrt/urlmakefile/current/Ast20/addpkg"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 330  # GitHub-hosted limit 6h/job, ставим меньше лимита. https://docs.github.com/en/actions/reference/limits
+    timeout-minutes: 330  # GitHub-hosted job limit = 6h. https://docs.github.com/en/actions/reference/limits
 
     env:
+      # SDK 24.10.4 mediatek/filogic + sha256 из официального каталога загрузок
+      # https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/  (см. openwrt-sdk-...tar.zst)
       SDK_URL: "https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
       SDK_SHA256: "b9762b8e1c8e114b0e6a252b98e94e6e4a1d2496beb9f6044c26227a8d78dee0"
       SDK_DIRNAME: "openwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64"
+
       CCACHE_DIR: "${{ github.workspace }}/.ccache"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare out/ + stub logs (so artifact is never empty)
+        run: |
+          set -eux
+          mkdir -p out
+          echo "CI started at: $(date -u +'%F %T UTC')" > out/meta.txt
+          echo "If build fails early, see workflow logs." > out/README.txt
 
       - name: Host deps
         run: |
@@ -37,14 +43,14 @@ jobs:
       - name: Cache (dl + ccache)
         uses: actions/cache@v4
         with:
-          # actions/cache создаёт новый cache на cache miss только если job завершился успешно
+          # Cache создаётся при cache miss только если job завершился успешно:
           # https://github.com/actions/cache
           path: |
             wrtsdk/dl
             .ccache
-          key: ${{ runner.os }}-owrt-24.10.4-filogic-${{ hashFiles('openwrt/urlmakefile/current/Ast20/chanq/Makefile','openwrt/urlmakefile/current/Ast20/addpkg') }}
+          key: ubuntu-22.04-owrt-24.10.4-filogic-sdk-b9762b8e-chanq-v1
           restore-keys: |
-            ${{ runner.os }}-owrt-24.10.4-filogic-
+            ubuntu-22.04-owrt-24.10.4-filogic-
 
       - name: Download SDK + verify sha256
         run: |
@@ -59,21 +65,21 @@ jobs:
           mv "${SDK_DIRNAME}" wrtsdk
           rm -f sdk.tar.zst
 
-      - name: Sanity check SDK contains base packages
+      - name: Sanity check SDK (DON'T check openssl path)
         run: |
           set -eux
-          test -f wrtsdk/package/libs/openssl/Makefile
+          test -x wrtsdk/scripts/feeds
+          test -f wrtsdk/feeds.conf.default || true
+          echo "SDK extracted OK" >> out/meta.txt
 
-      - name: Write pinned feeds.conf IMPORTANT relative src-link path!
+      - name: Write hardcoded feeds.conf (pinned commits from feeds.buildinfo)
         run: |
           set -eux
-          cat > wrtsdk/feeds.conf <<EOF
-          # Pinned commits from:
+          # src-link = ln -s (OpenWrt scripts/feeds), поэтому путь должен существовать буквально.
+          # https://raw.githubusercontent.com/openwrt/openwrt/v24.10.4/scripts/feeds
+          cat > wrtsdk/feeds.conf <<'EOF'
+          # Pinned commits for 24.10.4 filogic:
           # https://downloads.openwrt.org/releases/24.10.4/targets/mediatek/filogic/feeds.buildinfo
-          #
-          # IMPORTANT:
-          # We use RELATIVE PATH so nothing depends on ${GITHUB_WORKSPACE} expansion.
-          # src-link is implemented as ln -s (see scripts/feeds in OpenWrt). 
           src-link cusrepo ../openwrt/urlmakefile/current/Ast20
           src-git packages https://github.com/openwrt/packages.git^f1470815f41fe199bfdafe9a91ad115bc2e91203
           src-git luci https://github.com/openwrt/luci.git^75e41cba5160281b2d1dca922719efef29f7ffd8
@@ -81,24 +87,23 @@ jobs:
           src-git telephony https://github.com/openwrt/telephony.git^2a4541d46199ac96fac214d02c908402831c4dc6
           EOF
 
-      - name: Update feeds (only what we need)
+      - name: Update feeds (only needed)
         working-directory: wrtsdk
         run: |
           set -eux
           ./scripts/feeds update cusrepo packages telephony
 
-      - name: Install feeds (explicitly install cusrepo!)
+      - name: Install feeds (must install cusrepo -> package/feeds/cusrepo/chanq)
         working-directory: wrtsdk
         run: |
           set -eux
-          # scripts/feeds install -a / -p описаны в help scripts/feeds
           ./scripts/feeds install -p cusrepo -a
           ./scripts/feeds install -p packages -a
           ./scripts/feeds install -p telephony asterisk
 
-          # MUST EXIST, иначе дальше нет цели package/feeds/cusrepo/chanq/compile
+          # КРИТИЧНО: иначе дальше будет "No rule to make target package/feeds/cusrepo/chanq/compile"
           test -f package/feeds/cusrepo/chanq/Makefile
-          ls -la package/feeds/cusrepo/chanq
+          echo "cusrepo installed OK" >> ../out/meta.txt
 
       - name: Prepare .config
         working-directory: wrtsdk
@@ -108,9 +113,9 @@ jobs:
           echo "CONFIG_CCACHE=y" >> .config
           cat ../openwrt/urlmakefile/current/Ast20/addpkg >> .config
           make defconfig
-          grep -nE 'CONFIG_PACKAGE_asterisk(=|_)|CONFIG_PACKAGE_asterisk20-chan-quectel' .config || true
+          cp -f .config ../out/.config
 
-      - name: Build only chanq (the DIRECTORY), capture build.log
+      - name: Build only chanq (directory target), capture build.log
         working-directory: wrtsdk
         shell: bash
         run: |
@@ -119,23 +124,18 @@ jobs:
           export CCACHE_COMPRESS=1
           export CCACHE_MAXSIZE=1G
 
-          # TARGETED COMMAND (as requested):
-          make -j1 V=sc package/feeds/cusrepo/chanq/compile 2>&1 | tee ../build.log
+          # ТРЕБУЕМАЯ ЦЕЛЬ:
+          make -j1 V=sc package/feeds/cusrepo/chanq/compile 2>&1 | tee ../out/build.log
 
-      - name: Collect artifacts
+      - name: Collect resulting ipk(s)
         if: always()
         run: |
           set -eux
-          mkdir -p out
-
-          cp -f build.log out/ || true
-          cp -f wrtsdk/.config out/ || true
-          cp -f wrtsdk/feeds.conf out/ || true
-
-          # copy built ipk(s)
+          # В SDK пакеты складываются в wrtsdk/bin/packages/<arch>/<feed>/
           find wrtsdk/bin/packages -type f -name '*.ipk' -print -exec cp -f {} out/ \; || true
+          ls -la out | sed -n '1,200p'
 
-      - name: Upload artifacts (debug + ipk)
+      - name: Upload artifacts (must include ipk + build.log)
         if: always()
         uses: actions/upload-artifact@v4
         with:

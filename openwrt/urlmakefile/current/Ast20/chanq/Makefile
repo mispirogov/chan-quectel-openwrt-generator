@@ -4,7 +4,7 @@ PKG_NAME:=asterisk20-chan-quectel
 PKG_VERSION:=2025.03.24
 PKG_RELEASE:=1
 
-# Pinned upstream source (commit known; patch link):
+# Pinned upstream commit (fixed point):
 # https://github.com/IchthysMaranatha/asterisk-chan-quectel/commit/3d45c7f072131296a7e3c1a4faf5bb18751dbd87.patch
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel.git
@@ -12,7 +12,6 @@ PKG_SOURCE_VERSION:=3d45c7f072131296a7e3c1a4faf5bb18751dbd87
 PKG_SOURCE_DATE:=2025-03-24
 
 PKG_FIXUP:=autoreconf
-
 PKG_LICENSE:=GPL-2.0
 PKG_LICENSE_FILES:=COPYRIGHT.txt LICENSE.txt
 
@@ -28,14 +27,13 @@ define Package/$(PKG_NAME)
   TITLE:=Asterisk 20 chan_quectel for Quectel EC25 (UAC)
   URL:=https://github.com/IchthysMaranatha/asterisk-chan-quectel
 
-  # Требуемые зависимости (как вы просили):
-  # asterisk, alsa-lib, kmod-usb-audio, kmod-usb-acm, kmod-usb-serial-option, libusb-1.0, usb-modeswitch, libsqlite3
+  # Runtime deps requested
   DEPENDS:=+asterisk +alsa-lib +libusb-1.0 +usb-modeswitch +libsqlite3 \
     +kmod-usb-audio +kmod-usb-acm +kmod-usb-serial-option
 endef
 
 define Package/$(PKG_NAME)/description
-Asterisk channel driver for Quectel modules (EC25). Intended for voice; supports UAC mode (USB sound card).
+Asterisk channel driver for Quectel modems (EC25 series), voice via USB/UAC possible.
 endef
 
 CONFIGURE_ARGS+= \
@@ -55,6 +53,7 @@ CONFIGURE_VARS += \
   ac_cv_type_size_t=yes \
   ac_cv_type_ssize_t=yes
 
+# CRITICAL: use default prepare (unpack/patch/etc), like in openwrt/telephony asterisk-chan-dongle.
 define Build/Prepare
 	$(call Build/Prepare/Default)
 endef
